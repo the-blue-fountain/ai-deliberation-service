@@ -1,0 +1,1 @@
+web: cd chatbot_site && gunicorn chatbot_site.wsgi --bind 0.0.0.0:$PORT

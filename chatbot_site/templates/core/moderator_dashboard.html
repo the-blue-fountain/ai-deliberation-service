@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+{% load analysis_tags %}
+
+{% block content %}
+<div class="row gy-4">
+    <div class="col-12 col-lg-6">
+        <div class="card content-card p-4 mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h2 class="fs-5 mb-0">Select Session</h2>
+                <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#newSessionModal">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-plus-lg" viewBox="0 0 16 16">
+                        <path fill-rule="evenodd" d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2Z"/>
+                    </svg>
+                    Create New Session
+                </button>
+            </div>
+            <form method="post" novalidate class="row g-2">
+                {% csrf_token %}
+                <div class="col-12">
+                    {{ selection_form.session_id.label_tag }}
+                    {{ selection_form.session_id }}
+                </div>
+                <div class="col-12 d-flex justify-content-end">
+                    <button type="submit" class="btn btn-secondary" name="action" value="load_session">Load Session</button>
+                </div>
+                <p class="text-muted small mb-0">Select an existing session to load it for editing.</p>
+            </form>
+        </div>
+
+        <div class="card content-card p-4">
+            <h2 class="fs-4 mb-3">Moderator Controls</h2>
+            <form method="post" novalidate>
+                {% csrf_token %}
+                {{ session_form.non_field_errors }}
+                {{ session_form.as_p }}
+                <div class="d-flex flex-wrap gap-2 mt-3">
+                    <button type="submit" class="btn btn-primary" name="action" value="save_session" {% if not selected_session %}disabled{% endif %}>Save Changes</button>
+                    <button type="submit" class="btn btn-outline-primary" name="action" value="create_session">Save As New</button>
+                    <button type="submit" class="btn btn-outline-secondary" name="action" value="run_rag" {% if not selected_session %}disabled{% endif %}>Run RAG</button>
+                    <button type="submit" class="btn btn-outline-success" name="action" value="activate_session" {% if not selected_session or selected_session.is_active %}disabled{% endif %}>Activate Session</button>
+                    <button type="submit" class="btn btn-outline-dark" name="action" value="analyze" {% if not selected_session %}disabled{% endif %}>Analyze</button>
+                </div>
+                {% if selected_session %}
+                    <dl class="row small text-muted mt-3 mb-0">
+                        <dt class="col-sm-5">Session ID</dt>
+                        <dd class="col-sm-7">{{ selected_session.s_id }}</dd>
+                        <dt class="col-sm-5">Active</dt>
+                        <dd class="col-sm-7">{{ selected_session.is_active|yesno:"Yes,No" }}</dd>
+                        <dt class="col-sm-5">RAG status</dt>
+                        <dd class="col-sm-7">
+                            {% if selected_session.rag_chunk_count %}
+                                {{ selected_session.rag_chunk_count }} chunks @ {{ selected_session.rag_last_built_at|date:"Y-m-d H:i" }}
+                            {% else %}
+                                Not built yet
+                            {% endif %}
+                        </dd>
+                    </dl>
+                {% endif %}
+            </form>
+        </div>
+
+        <div class="card content-card p-4 mt-4">
+            <h3 class="fs-5 mb-3">User Conversations</h3>
+            {% if available_views %}
+                <ul class="list-group list-group-flush">
+                    {% for view in available_views %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong>User {{ view.user_id }}</strong>
+                                <span class="text-muted small">· {{ view.message_count }} messages</span>
+                                {% if view.has_views %}
+                                    <span class="badge text-bg-success ms-2">Summary ready</span>
+                                {% else %}
+                                    <span class="badge text-bg-warning ms-2">In progress</span>
+                                {% endif %}
+                            </div>
+                            <span class="badge {% if view.active %}text-bg-primary{% else %}text-bg-secondary{% endif %}">
+                                {% if view.active %}Active{% else %}Closed{% endif %}
+                            </span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="text-muted mb-0">No conversations have been recorded for this session yet.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="col-12 col-lg-6">
+        <div class="card content-card p-4 mb-4">
+            <h2 class="fs-4 mb-3">Moderator Summary</h2>
+            {% if selected_session and selected_session.moderator_summary %}
+                {% with summary=selected_session.moderator_summary|parse_json %}
+                    {% if summary %}
+                        <div>
+                            {% if summary.consensus %}
+                            <div class="mb-4">
+                                <h5 class="fs-6 text-success fw-semibold mb-2">✓ Consensus</h5>
+                                <ul class="list-unstyled ps-3">
+                                    {% for item in summary.consensus %}
+                                    <li class="mb-2">{{ item }}</li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                            {% endif %}
+
+                            {% if summary.disagreement %}
+                            <div class="mb-4">
+                                <h5 class="fs-6 text-warning fw-semibold mb-2">⚠ Disagreement</h5>
+                                <ul class="list-unstyled ps-3">
+                                    {% for item in summary.disagreement %}
+                                    <li class="mb-2">{{ item }}</li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                            {% endif %}
+
+                            {% if summary.strength_of_sentiment %}
+                            <div class="mb-4">
+                                <h5 class="fs-6 text-info fw-semibold mb-2">💭 Sentiment Strength</h5>
+                                <ul class="list-unstyled ps-3">
+                                    {% for item in summary.strength_of_sentiment %}
+                                    <li class="mb-2">{{ item }}</li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                            {% endif %}
+
+                            {% if summary.confusion %}
+                            <div class="mb-4">
+                                <h5 class="fs-6 text-danger fw-semibold mb-2">❓ Confusion/Gaps</h5>
+                                <ul class="list-unstyled ps-3">
+                                    {% for item in summary.confusion %}
+                                    <li class="mb-2">{{ item }}</li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                            {% endif %}
+
+                            {% if summary.missing_information %}
+                            <div class="mb-4">
+                                <h5 class="fs-6 text-secondary fw-semibold mb-2">📋 Missing Information</h5>
+                                <ul class="list-unstyled ps-3">
+                                    {% for item in summary.missing_information %}
+                                    <li class="mb-2">{{ item }}</li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                            {% endif %}
+                        </div>
+                    {% else %}
+                        <div class="markdown-box">{{ selected_session.moderator_summary }}</div>
+                    {% endif %}
+                {% endwith %}
+            {% else %}
+                <p class="text-muted mb-0">Run an analysis to populate the summary.</p>
+            {% endif %}
+        </div>
+        <div class="card content-card p-4">
+            <h3 class="fs-5 mb-3">Analysis Notes</h3>
+            {% if selected_session and selected_session.moderator_temp %}
+                <pre class="markdown-box mb-0">{{ selected_session.moderator_temp }}</pre>
+            {% else %}
+                <p class="text-muted mb-0">Run the Analyze action to generate moderator notes.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Create New Session Modal -->
+<div class="modal fade" id="newSessionModal" tabindex="-1" aria-labelledby="newSessionModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5" id="newSessionModalLabel">Create New Session</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="newSessionForm" method="post" novalidate>
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="id_session_id_modal" class="form-label">Session ID <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="id_session_id_modal" name="s_id" placeholder="Unique session identifier" required>
+                        <div class="form-text">A unique identifier for this session</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="id_topic_modal" class="form-label">Topic <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="id_topic_modal" name="topic" placeholder="Discussion topic" required>
+                        <div class="form-text">Main topic for this discussion</div>
+                    </div>
+                    <div id="sessionFormErrors" class="alert alert-danger d-none" role="alert"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Session</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const newSessionForm = document.getElementById('newSessionForm');
+    const newSessionModal = document.getElementById('newSessionModal');
+    const formErrors = document.getElementById('sessionFormErrors');
+    
+    if (newSessionForm) {
+        newSessionForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const sessionId = document.getElementById('id_session_id_modal').value.trim();
+            const topic = document.getElementById('id_topic_modal').value.trim();
+            const csrfToken = document.querySelector('[name="csrfmiddlewaretoken"]').value;
+            
+            // Validation
+            if (!sessionId) {
+                formErrors.textContent = 'Session ID is required.';
+                formErrors.classList.remove('d-none');
+                return;
+            }
+            
+            if (!topic) {
+                formErrors.textContent = 'Topic is required.';
+                formErrors.classList.remove('d-none');
+                return;
+            }
+            
+            formErrors.classList.add('d-none');
+            
+            try {
+                const response = await fetch('{% url "create_new_session_api" %}', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrfToken,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        s_id: sessionId,
+                        topic: topic,
+                    }),
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Close modal
+                    const modal = bootstrap.Modal.getInstance(newSessionModal);
+                    modal.hide();
+                    
+                    // Reload page to show new session
+                    window.location.href = `{% url "moderator_dashboard" %}?session_id=${data.session_id}`;
+                } else {
+                    formErrors.textContent = data.error || 'An error occurred while creating the session.';
+                    formErrors.classList.remove('d-none');
+                }
+            } catch (error) {
+                formErrors.textContent = 'Network error: ' + error.message;
+                formErrors.classList.remove('d-none');
+            }
+        });
+    }
+});
+</script>
+{% endblock %}
