@@ -77,9 +77,11 @@ class UserConversationService:
 
         system_prompt = self.session.user_system_prompt or DEFAULT_USER_SYSTEM_PROMPT
 
+        # Use the per-user objective (question) as the primary prompt for the user-facing bot.
+        objective = self.session.get_objective_for_user(self.conversation.user_id)
         topic_prompt = (
-            f"The topic defined by the moderator is: {self.session.topic or 'No topic set yet.'}. "
-            "Refuse to switch topics."
+            f"The objective question for this participant is: {objective or (self.session.topic or 'No question set yet.')}. "
+            "Do not display the moderator-facing topic to participants and refuse to switch topics."
         )
         streak_prompt = (
             "No new information was registered in the previous message." if prior_no_new else
@@ -215,9 +217,11 @@ class UserConversationService:
             return ""
 
         system_prompt = USER_BOT_FINAL_PROMPT
+        # Use per-user objective/question when producing the final views document.
+        objective = self.session.get_objective_for_user(self.conversation.user_id)
         topic_prompt = (
-            "The moderator-defined topic is: "
-            f"{self.session.topic or 'No topic recorded.'}"
+            "The moderator-defined objective/question for this participant is: "
+            f"{objective or (self.session.topic or 'No objective recorded.')}"
         )
 
         messages: List[Dict[str, str]] = [
@@ -289,6 +293,18 @@ class ModeratorAnalysisService:
             return None
 
         system_prompt = self.session.moderator_system_prompt or DEFAULT_MODERATOR_SYSTEM_PROMPT
+
+        # Prepare payload and ensure we remain under token limits by truncating if needed
+        payload_obj = {"topic": self.session.topic, "user_views": user_views}
+        payload_text = json.dumps(payload_obj)
+
+        # If payload is large, truncate each user's view content to keep token usage reasonable.
+        if estimate_tokens(payload_text) > MAX_TOKENS_PER_REQUEST:
+            for v in user_views:
+                content = v.get("content", "") or ""
+                # Truncate long view content to a safe size (characters) to reduce tokens
+                if len(content) > 2000:
+                    v["content"] = content[:2000] + "\n\n... (truncated)"
 
         messages: List[Dict[str, str]] = [
             {"role": "system", "content": system_prompt},

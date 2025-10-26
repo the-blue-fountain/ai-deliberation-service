@@ -217,10 +217,12 @@ def moderator_dashboard(request: HttpRequest) -> HttpResponse:
 
 def user_conversation(request: HttpRequest, user_id: int) -> HttpResponse:
     session = DiscussionSession.get_active()
-    if not session.topic:
+    # Determine the per-user objective/question for this participant
+    question = session.get_objective_for_user(user_id) if session else ""
+    if not question:
         messages.info(
             request,
-            "The moderator has not defined a topic yet. Please wait before sharing details.",
+            "The moderator has not provided your question yet. Please wait before sharing details.",
         )
     conversation, _ = UserConversation.objects.get_or_create(session=session, user_id=user_id)
 
@@ -293,5 +295,6 @@ def user_conversation(request: HttpRequest, user_id: int) -> HttpResponse:
         "temp_snapshot": temp_snapshot,
         "views_snapshot": views_snapshot,
         "topic": session.topic,
+        "question": question,
     }
     return render(request, "core/user_conversation.html", context)

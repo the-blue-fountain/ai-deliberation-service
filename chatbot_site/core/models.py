@@ -26,6 +26,9 @@ class DiscussionSession(models.Model):
     """Represents a full moderator-led discussion workflow."""
 
     s_id = models.CharField(max_length=64, unique=True)
+    participant_count = models.PositiveIntegerField(default=0)
+    # objectives is a list of strings where index 0 is user 1's question, etc.
+    objectives = models.JSONField(default=list, blank=True)
     topic = models.CharField(max_length=255, blank=True)
     user_system_prompt = models.TextField(
         blank=True,
@@ -59,6 +62,18 @@ class DiscussionSession(models.Model):
         if not self.is_active:
             self.is_active = True
             self.save(update_fields=["is_active"])
+
+    def get_objective_for_user(self, user_id: int) -> str:
+        """Return the objective question for a given user id (1-indexed)."""
+        try:
+            idx = int(user_id) - 1
+        except Exception:
+            return ""
+        if not isinstance(self.objectives, (list, tuple)):
+            return ""
+        if 0 <= idx < len(self.objectives):
+            return (self.objectives[idx] or "").strip()
+        return ""
 
     @classmethod
     def get_active(cls) -> "DiscussionSession":
