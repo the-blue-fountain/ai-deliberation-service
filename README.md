@@ -100,37 +100,31 @@ Results displayed with interactive formatting
 
 ### Local Development
 
-1. **Set up environment**
+First clone the project as : 
 ```bash
-
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-cd ai-deliberation-system/chatbot_site
-
+git clone https://github.com/the-blue-fountain/ai-deliberation-service.git
+cd ai-deliberation-service
 ```
+Install pyenv on your system. 
+```bash 
+pamac install pyenv #for Arch based distros
 
-2. **Configure database**
-Open an account on Neon DB and open a project. Select the "connect" option on the dashboard to get the database string, which should be set as the DATABASE_URL variable in the .env. 
-Else you can do from the terminal :
-```bash
-# Local SQLite (default) or set DATABASE_URL for PostgreSQL
-export DATABASE_URL="postgresql://user:password@host/dbname?sslmode=require"
+#for Ubuntu or Debian based , see below
+curl https://pyenv.run | bash
+echo -e '\n# Pyenv setup\nexport PATH="$HOME/.pyenv/bin:$PATH"\neval "$(pyenv init --path)"\neval "$(pyenv init -)"\neval "$(pyenv virtualenv-init -)"' >> ~/.bashrc
+source ~/.bashrc
 ```
-
-3. **Configure OpenAI API key**
-Please set the variable OPENAI_API_KEY to you openai api key, or else you can do, from the terminal :
+Then make the script run.sh executable with 
 ```bash
-# Option 1: Environment variable (preferred for production)
-export OPENAI_API_KEY="sk-..."
-
-# Option 2: Local file (for development)
-echo "sk-..." > ../openai-api-key.txt
+chmod +x run.sh 
 ```
-
-4. **Initialize database**
-After you download the application, 
+and run the script 
 ```bash
+./run.sh
+```
+Then, to run the application :
+```bash
+cd chatbot_site
 python manage.py makemigrations
 python manage.py migrate
 python manage.py runserver
