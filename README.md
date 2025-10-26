@@ -94,7 +94,7 @@ Results displayed with interactive formatting
 
 ### Prerequisites
 - Python 3.10+
-- PostgreSQL (Neon recommended for hosting)
+- PostgreSQL (Neon recommended for hosting) (no )
 - OpenAI API key
 - Virtual environment
 
@@ -131,6 +131,7 @@ echo "sk-..." > ../openai-api-key.txt
 4. **Initialize database**
 After you download the application, 
 ```bash
+python manage.py makemigrations
 python manage.py migrate
 python manage.py runserver
 ```
