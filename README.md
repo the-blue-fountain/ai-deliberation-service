@@ -1,6 +1,8 @@
 # DiscussChat - AI-Facilitated Topic Discussion Platform
 
-A sophisticated Django-based platform that uses AI to facilitate structured discussions on topics, capturing nuanced perspectives from multiple participants with RAG-enhanced context awareness.
+A sophisticated Django-based platform that uses AI to facilitate structured discussions on topics, capturing nuanced perspectives from multiple participants with RAG-enhanced context awareness.   
+
+This README is written, assuming the user is on the Linux OS.     
 
 ## 🎯 Overview
 
@@ -100,19 +102,24 @@ Results displayed with interactive formatting
 
 1. **Set up environment**
 ```bash
-cd chatbot-nodiv/chatbot_site
+
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
+cd ai-deliberation-system/chatbot_site
+
 ```
 
 2. **Configure database**
+Open an account on Neon DB and open a project. Select the "connect" option on the dashboard to get the database string, which should be set as the DATABASE_URL variable in the .env. 
+Else you can do from the terminal :
 ```bash
 # Local SQLite (default) or set DATABASE_URL for PostgreSQL
 export DATABASE_URL="postgresql://user:password@host/dbname?sslmode=require"
 ```
 
 3. **Configure OpenAI API key**
+Please set the variable OPENAI_API_KEY to you openai api key, or else you can do, from the terminal :
 ```bash
 # Option 1: Environment variable (preferred for production)
 export OPENAI_API_KEY="sk-..."
@@ -122,6 +129,7 @@ echo "sk-..." > ../openai-api-key.txt
 ```
 
 4. **Initialize database**
+After you download the application, 
 ```bash
 python manage.py migrate
 python manage.py runserver
