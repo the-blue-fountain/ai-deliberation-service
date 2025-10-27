@@ -52,10 +52,6 @@ To run DiscussChat on your computer, follow these steps:
    ```bash
    ./run.sh
    ```
-5. **Start the application**: Launch the web server.
-   ```bash
-   python manage.py runserver
-   ```
 
 6. **Access the application**: Open your web browser and go to `http://localhost:8000/`. Use participant ID `0` for the moderator dashboard, or `1`, `2`, `3`, etc. for participants.
 
