@@ -1,33 +1,87 @@
 #!/bin/bash
 
-# Check if pyenv is installed
-if ! command -v pyenv &> /dev/null; then
-    echo "Error: pyenv is not installed. Please install pyenv first."
-    echo "Installation instructions: https://github.com/pyenv/pyenv#installation"
+# Exit on any error
+set -e
+
+echo "=========================================="
+echo "Django Application Setup Script"
+echo "=========================================="
+echo ""
+
+# Check if uv is installed
+if ! command -v uv &> /dev/null; then
+    echo "❌ uv is not installed!"
+    echo "Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    echo ""
+    echo "✅ uv installed successfully!"
+    echo "Please restart your terminal and run this script again."
+    exit 0
+fi
+
+echo "✅ uv is installed"
+echo ""
+
+# Define virtual environment name
+VENV_NAME=".adsys"
+
+# Check if virtual environment exists and remove it
+if [ -d "$VENV_NAME" ]; then
+    echo "🗑️  Removing existing virtual environment..."
+    rm -rf "$VENV_NAME"
+    echo "✅ Old virtual environment removed"
+    echo ""
+fi
+
+# Install Python 3.13.7 using uv
+echo "📦 Installing Python 3.13.7..."
+uv python install 3.13.7
+echo "✅ Python 3.13.7 installed"
+echo ""
+
+# Create virtual environment with Python 3.13.7
+echo "🔨 Creating virtual environment..."
+uv venv "$VENV_NAME" --python 3.13.7
+echo "✅ Virtual environment created"
+echo ""
+
+# Activate virtual environment
+echo "🔄 Activating virtual environment..."
+source "$VENV_NAME/bin/activate"
+echo "✅ Virtual environment activated"
+echo ""
+
+# Install packages from requirements.txt
+echo "📥 Installing packages from requirements.txt..."
+uv pip install -r requirements.txt
+echo "✅ All packages installed"
+echo ""
+
+# Navigate to chatbot_site directory
+if [ ! -d "chatbot_site" ]; then
+    echo "❌ Error: chatbot_site directory not found!"
+    echo "Please make sure you're running this script from the correct directory."
     exit 1
 fi
 
-# Install Python 3.13.7 if not already installed
-if ! pyenv versions | grep -q "3.13.7"; then
-    echo "Installing Python 3.13.7 with pyenv..."
-    pyenv install 3.13.7
-fi
+echo "📂 Navigating to chatbot_site directory..."
+cd chatbot_site
+echo ""
 
-# Set local Python version to 3.13.7
-echo "Setting local Python version to 3.13.7..."
-pyenv local 3.13.7
+# Run Django management commands
+echo "🔧 Running Django migrations..."
+python3.13 manage.py makemigrations
+echo ""
 
-# Create virtual environment
-echo "Creating virtual environment..."
-python -m venv venv
+echo "🔧 Applying migrations..."
+python3.13 manage.py migrate
+echo ""
 
-# Activate the virtual environment
-echo "Activating virtual environment..."
-source venv/bin/activate
+echo "=========================================="
+echo "🚀 Starting Django development server..."
+echo "=========================================="
+echo ""
+echo "Press CTRL+C to stop the server"
+echo ""
 
-# Install required packages
-echo "Installing packages from requirements.txt..."
-pip install -r requirements.txt
-
-echo "Setup complete. Virtual environment is activated and packages are installed."
-echo "To activate the environment in future sessions, run: source venv/bin/activate"
+python3.13 manage.py runserver
