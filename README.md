@@ -21,11 +21,13 @@ The platform consists of several key parts that work together:
    - User conversations: Each participant's chat history, notes taken during the discussion, and a final summary of their views.
    - Analysis results: Synthesized insights from all participants, highlighting areas of agreement, disagreement, and gaps in understanding.
 
+Important note: The platform no longer requires moderators to specify how many participants will join. Moderators provide a topic and an objective question (or use the "Generate Questions" helper) and the same question is presented to every participant. This makes it effortless to add participants at any time.
+
 ### How a Discussion Works
 
 1. **Setup Phase**: A moderator creates a new discussion session by choosing a topic and optionally providing background information or custom instructions for the AI.
 
-2. **Participant Phase**: Multiple people can join the discussion simultaneously. Each participant chats with their own AI assistant, sharing their thoughts and answering follow-up questions. The AI keeps track of what each person says and builds up a profile of their perspective.
+2. **Question generation & Participant Phase**: After creating a session, the moderator can press "Generate Questions" to ask the AI to propose four short, objective candidate questions based on the topic. The moderator selects one of those questions (or chooses "None of these" and types their own). That single objective question is then given to every participant. Participants can join at any time and will see the same question when they answer.
 
 3. **Synthesis Phase**: Once participants finish sharing, the AI combines everyone's individual summaries into a comprehensive overview. This highlights common ground, differences of opinion, strong feelings, and areas that need more clarification.
 

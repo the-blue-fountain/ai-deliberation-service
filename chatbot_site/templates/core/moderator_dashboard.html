@@ -33,6 +33,16 @@
                 {% csrf_token %}
                 {{ session_form.non_field_errors }}
                 {{ session_form.as_p }}
+                <div class="mb-3">
+                    <button type="button" class="btn btn-outline-info" id="generateQuestionsBtn">Generate Questions</button>
+                    <small class="text-muted ms-2">Ask the AI to suggest 4 objective questions for the current topic.</small>
+                </div>
+                <div id="generatedQuestions" class="mb-3 d-none">
+                    <label class="form-label">AI suggestions</label>
+                    <div id="suggestionsList" class="list-group"></div>
+                    <div class="form-text mt-2">Click one suggestion to insert it into the Objective question field, or click "None of these" to enter your own.</div>
+                    <button type="button" id="noneOfTheseBtn" class="btn btn-sm btn-link mt-2">None of these</button>
+                </div>
                 <div class="d-flex flex-wrap gap-2 mt-3">
                     <button type="submit" class="btn btn-primary" name="action" value="save_session" {% if not selected_session %}disabled{% endif %}>Save Changes</button>
                     <button type="submit" class="btn btn-outline-primary" name="action" value="create_session">Save As New</button>
@@ -258,6 +268,91 @@ document.addEventListener('DOMContentLoaded', function() {
                 formErrors.textContent = 'Network error: ' + error.message;
                 formErrors.classList.remove('d-none');
             }
+        });
+    }
+});
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Generate Questions flow
+    const genBtn = document.getElementById('generateQuestionsBtn');
+    const suggestionsContainer = document.getElementById('generatedQuestions');
+    const suggestionsList = document.getElementById('suggestionsList');
+    const noneBtn = document.getElementById('noneOfTheseBtn');
+
+    if (genBtn) {
+        genBtn.addEventListener('click', async function(e) {
+            e.preventDefault();
+            const topicInput = document.getElementById('id_topic');
+            const topic = topicInput ? topicInput.value.trim() : '';
+            if (!topic) {
+                alert('Please enter a topic before generating questions.');
+                return;
+            }
+            genBtn.disabled = true;
+            genBtn.textContent = 'Generating...';
+            try {
+                const csrfToken = document.querySelector('[name="csrfmiddlewaretoken"]').value;
+                const res = await fetch('{% url "generate_questions_api" %}', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrfToken,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ topic }),
+                });
+                const data = await res.json();
+                genBtn.disabled = false;
+                genBtn.textContent = 'Generate Questions';
+                if (!data.success) {
+                    alert(data.error || 'Failed to generate suggestions.');
+                    return;
+                }
+                // Populate suggestions
+                suggestionsList.innerHTML = '';
+                const questions = data.questions || [];
+                if (questions.length === 0) {
+                    suggestionsList.innerHTML = '<div class="list-group-item">No suggestions returned.</div>';
+                } else {
+                    questions.forEach(function(q, idx) {
+                        const item = document.createElement('button');
+                        item.type = 'button';
+                        item.className = 'list-group-item list-group-item-action';
+                        item.textContent = q;
+                        item.addEventListener('click', function() {
+                            const objField = document.getElementById('id_objective_question');
+                            if (objField) {
+                                objField.value = q;
+                            }
+                        });
+                        suggestionsList.appendChild(item);
+                    });
+                    // Add 'None of these' as last option
+                    const noneItem = document.createElement('button');
+                    noneItem.type = 'button';
+                    noneItem.className = 'list-group-item list-group-item-action text-muted';
+                    noneItem.textContent = 'None of these — I will enter my own question';
+                    noneItem.addEventListener('click', function() {
+                        const objField = document.getElementById('id_objective_question');
+                        if (objField) {
+                            objField.focus();
+                        }
+                    });
+                    suggestionsList.appendChild(noneItem);
+                }
+                suggestionsContainer.classList.remove('d-none');
+            } catch (err) {
+                genBtn.disabled = false;
+                genBtn.textContent = 'Generate Questions';
+                alert('Error: ' + err.message);
+            }
+        });
+    }
+
+    if (noneBtn) {
+        noneBtn.addEventListener('click', function() {
+            const objField = document.getElementById('id_objective_question');
+            if (objField) objField.focus();
         });
     }
 });

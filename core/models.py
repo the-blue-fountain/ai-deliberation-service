@@ -18,18 +18,8 @@ class DiscussionSession(models.Model):
 
 	s_id = models.CharField(max_length=100, unique=True)
 	moderator_id = models.IntegerField(default=0)
-	num_users = models.IntegerField(default=0)
-
-	user_1 = JSONField(blank=True, null=True)
-	user_2 = JSONField(blank=True, null=True)
-	user_3 = JSONField(blank=True, null=True)
-	user_4 = JSONField(blank=True, null=True)
-	user_5 = JSONField(blank=True, null=True)
-	user_6 = JSONField(blank=True, null=True)
-	user_7 = JSONField(blank=True, null=True)
-	user_8 = JSONField(blank=True, null=True)
-	user_9 = JSONField(blank=True, null=True)
-	user_10 = JSONField(blank=True, null=True)
+	# The number of users is no longer stored. A single objective_question is used for all participants.
+	objective_question = models.TextField(blank=True, null=True)
 
 	info = JSONField(blank=True, null=True)
 	results = JSONField(blank=True, null=True)
@@ -38,4 +28,4 @@ class DiscussionSession(models.Model):
 	updated_at = models.DateTimeField(auto_now=True)
 
 	def __str__(self):
-		return f"DiscussionSession(s_id={self.s_id}, users={self.num_users})"
+		return f"DiscussionSession(s_id={self.s_id})"

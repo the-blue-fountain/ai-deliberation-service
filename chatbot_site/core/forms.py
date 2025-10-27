@@ -8,11 +8,11 @@ class ParticipantIdForm(forms.Form):
 
 
 class DiscussionSessionForm(forms.ModelForm):
-    # Present objectives as newline-separated textarea for moderator convenience
-    objectives_text = forms.CharField(
-        widget=forms.Textarea(attrs={"rows": 6, "class": "form-control", "placeholder": "One objective question per line (user 1 on line 1, user 2 on line 2, ...)"}),
+    # Single objective question shared by all participants.
+    objective_question = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 3, "class": "form-control", "placeholder": "Objective question for all participants (leave blank to generate)"}),
         required=False,
-        label="Participant objectives (one per line)",
+        label="Objective question",
     )
 
     class Meta:
@@ -20,7 +20,7 @@ class DiscussionSessionForm(forms.ModelForm):
         fields = [
             "s_id",
             "topic",
-            "participant_count",
+            "objective_question",
             "knowledge_base",
             "user_system_prompt",
             "moderator_system_prompt",
@@ -28,7 +28,7 @@ class DiscussionSessionForm(forms.ModelForm):
         widgets = {
             "s_id": forms.TextInput(attrs={"class": "form-control", "placeholder": "Unique session identifier"}),
             "topic": forms.TextInput(attrs={"class": "form-control"}),
-            "participant_count": forms.NumberInput(attrs={"class": "form-control", "min": 0}),
+            "objective_question": forms.Textarea(attrs={"rows": 3, "class": "form-control"}),
             "knowledge_base": forms.Textarea(
                 attrs={"rows": 8, "class": "form-control", "placeholder": "Moderator knowledge base for RAG"}
             ),
@@ -38,33 +38,14 @@ class DiscussionSessionForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Initialize objectives_text from instance.objectives
-        if self.instance and getattr(self.instance, "objectives", None):
-            if isinstance(self.instance.objectives, (list, tuple)):
-                self.fields["objectives_text"].initial = "\n".join(
-                    str(x) for x in self.instance.objectives
-                )
-
-    def clean_participant_count(self):
-        value = self.cleaned_data.get("participant_count")
-        if value is None:
-            return 0
-        return int(value)
-
-    def clean_objectives_text(self):
-        text = self.cleaned_data.get("objectives_text", "") or ""
-        # Convert to list of non-empty lines
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        return lines
+        # Initialize objective_question from instance
+        if self.instance and getattr(self.instance, "objective_question", None):
+            self.fields["objective_question"].initial = str(self.instance.objective_question)
 
     def save(self, commit=True):
         instance = super().save(commit=False)
-        objectives = self.cleaned_data.get("objectives_text")
-        if objectives is not None:
-            # objectives here is list from clean_objectives_text
-            instance.objectives = objectives
-        # Ensure participant_count is set
-        instance.participant_count = self.cleaned_data.get("participant_count") or 0
+        # objective_question is managed by the form field
+        instance.objective_question = self.cleaned_data.get("objective_question") or ""
         if commit:
             instance.save()
         return instance

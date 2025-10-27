@@ -26,9 +26,9 @@ class DiscussionSession(models.Model):
     """Represents a full moderator-led discussion workflow."""
 
     s_id = models.CharField(max_length=64, unique=True)
-    participant_count = models.PositiveIntegerField(default=0)
-    # objectives is a list of strings where index 0 is user 1's question, etc.
-    objectives = models.JSONField(default=list, blank=True)
+    # A single objective question that will be given to all participants.
+    # The system no longer asks moderators to provide a number of users.
+    objective_question = models.TextField(blank=True)
     topic = models.CharField(max_length=255, blank=True)
     user_system_prompt = models.TextField(
         blank=True,
@@ -64,16 +64,12 @@ class DiscussionSession(models.Model):
             self.save(update_fields=["is_active"])
 
     def get_objective_for_user(self, user_id: int) -> str:
-        """Return the objective question for a given user id (1-indexed)."""
-        try:
-            idx = int(user_id) - 1
-        except Exception:
-            return ""
-        if not isinstance(self.objectives, (list, tuple)):
-            return ""
-        if 0 <= idx < len(self.objectives):
-            return (self.objectives[idx] or "").strip()
-        return ""
+        """Return the current objective question for participants.
+
+        The platform now uses a single objective question shared by all users.
+        The user_id is ignored but kept for API compatibility.
+        """
+        return (self.objective_question or "").strip()
 
     @classmethod
     def get_active(cls) -> "DiscussionSession":

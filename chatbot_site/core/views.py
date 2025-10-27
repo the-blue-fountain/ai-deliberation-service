@@ -20,6 +20,8 @@ from .services.conversation_service import (
     UserConversationService,
 )
 from .services.rag_service import RagService
+from .services.openai_client import get_openai_client
+from django.conf import settings
 
 
 @require_http_methods(["POST"])
@@ -63,6 +65,52 @@ def create_new_session_api(request: HttpRequest) -> JsonResponse:
         })
     except Exception as exc:
         return JsonResponse({"success": False, "error": str(exc)})
+
+
+@require_http_methods(["POST"])
+def generate_questions_api(request: HttpRequest) -> JsonResponse:
+    """Generate 4 candidate objective questions for a given topic using the LLM.
+
+    Expects JSON body {"topic": "..."} and returns {"success": True, "questions": [...]}.
+    """
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON"}, status=400)
+
+    topic = (data.get("topic") or "").strip()
+    if not topic:
+        return JsonResponse({"success": False, "error": "Topic is required"}, status=400)
+
+    try:
+        client = get_openai_client()
+        system = (
+            "You are a helpful assistant that creates short, objective, neutral discussion questions. "
+            "Given a topic, produce exactly four concise objective questions suitable for asking participants. "
+            "Return the result as a JSON array of strings only."
+        )
+        user = f"Topic: {topic}\n\nProduce 4 short objective questions (as a JSON array)."
+        completion = client.chat.completions.create(
+            model=settings.OPENAI_MODEL_NAME,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            # Let model return a JSON array in text form
+        )
+        content = completion.choices[0].message.content or ""
+        try:
+            questions = json.loads(content)
+            if not isinstance(questions, list):
+                raise ValueError("Response not a list")
+        except Exception:
+            # Fallback: try to extract lines and return up to 4 short lines
+            lines = [l.strip('- ').strip() for l in content.splitlines() if l.strip()]
+            questions = lines[:4]
+
+        return JsonResponse({"success": True, "questions": questions})
+    except Exception as exc:
+        return JsonResponse({"success": False, "error": str(exc)}, status=500)
 
 
 def entry_point(request: HttpRequest) -> HttpResponse:
