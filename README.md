@@ -33,8 +33,18 @@ Important note: The platform no longer requires moderators to specify how many p
 
 The system is designed to handle multiple discussions at once and keeps all data organized so moderators can review past sessions or run new analyses.
 
-## Creating an account on Neondb
+## Creating a database on Neondb
 
+- Create an account. You will land on the dashboard.
+- Select "Create Project".
+![alt text](screenshots/create-project.png)
+- Enter the project details in the next screen and click "Create".
+![alt text](screenshots/create-project.png)
+- Click on "Connect" in the top right corner of the Dashboard.
+![alt text](screenshots/dashboard.png)
+- Now you can see the connection string. That will be the value of the `DATABASE_URL` environment variable.
+![alt text](screenshots/connection_string.png)
+   
 ## Running the application
 
 To run DiscussChat on your computer, follow these steps:
@@ -59,6 +69,20 @@ To run DiscussChat on your computer, follow these steps:
 
 ## Creating an account on Render
 
+- Go to [Render](https://render.com/) and sign up for an account.
+![alt text](screenshots/create-account-render.png)
+- Once logged in, select "New Web Service".
+![alt text](screenshots/web-services.png)
+- We chose to get the project from GitHub to create the web service. Enter the repo url and click "Connect".
+![alt text](screenshots/create-web-service.png)
+- In the enxt screen, you will be asked to fill several boxes, and most will be pre-filled. You will have to set the start an dbuild commands as in the below screenshot:
+![alt text](screenshots/commands.png)
+- For the enviroment variables, you can simply select "Add from .env".
+![alt text](screenshots/env.png)
+- Paste the contents of your `.env` file and click "Add variables".
+![alt text](screenshots/env-add.png)
+
+That's it!
 ## Supported OS
 
 DiscussChat has first-class support for Linux systems. It is designed and tested primarily on Linux, ensuring the best performance and compatibility. While it may work on other operating systems, Linux is recommended for the most reliable experience.
