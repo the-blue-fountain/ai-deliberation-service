@@ -87,26 +87,33 @@ def generate_questions_api(request: HttpRequest) -> JsonResponse:
         system = (
             "You are a helpful assistant that creates short, objective, neutral discussion questions. "
             "Given a topic, produce exactly four concise objective questions suitable for asking participants. "
-            "Return the result as a JSON array of strings only."
+            "Return ONLY a JSON object with a 'questions' key containing an array of 4 question strings. "
+            "Example format: {\"questions\": [\"question 1\", \"question 2\", \"question 3\", \"question 4\"]}"
         )
-        user = f"Topic: {topic}\n\nProduce 4 short objective questions (as a JSON array)."
+        user = f"Topic: {topic}\n\nGenerate 4 short objective questions."
         completion = client.chat.completions.create(
             model=settings.OPENAI_MODEL_NAME,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            # Let model return a JSON array in text form
+            response_format={"type": "json_object"},
         )
         content = completion.choices[0].message.content or ""
         try:
-            questions = json.loads(content)
+            response_data = json.loads(content)
+            questions = response_data.get("questions", [])
             if not isinstance(questions, list):
-                raise ValueError("Response not a list")
-        except Exception:
+                questions = []
+            # Ensure we have exactly 4 questions and clean them
+            questions = [str(q).strip() for q in questions[:4] if q]
+        except Exception as e:
             # Fallback: try to extract lines and return up to 4 short lines
-            lines = [l.strip('- ').strip() for l in content.splitlines() if l.strip()]
-            questions = lines[:4]
+            # Remove common JSON artifacts and clean up
+            cleaned = content.replace('[', '').replace(']', '').replace('{', '').replace('}', '')
+            cleaned = cleaned.replace('"questions":', '').replace('"', '')
+            lines = [l.strip('-, ').strip() for l in cleaned.splitlines() if l.strip() and len(l.strip()) > 10]
+            questions = [q for q in lines[:4] if q]
 
         return JsonResponse({"success": True, "questions": questions})
     except Exception as exc:
