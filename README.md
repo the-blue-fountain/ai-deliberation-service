@@ -83,6 +83,27 @@ To run DiscussChat on your computer, follow these steps:
 ![alt text](screenshots/env-add.png)
 
 That's it!
+
+## Environment Variables 
+
+### Django Configuration
+DJANGO_DEBUG=True (False for Production)
+DJANGO_SECRET_KEY=your-secret-key-here
+ALLOWED_HOSTS=localhost,127.0.0.1, your site domain for production
+
+### Database Configuration (Neon PostgreSQL)
+DATABASE_URL=postgresql://user:password@host:port/dbname?sslmode=require&channel_binding=require (get from neon db)
+
+### OpenAI API Configuration
+OPENAI_API_KEY=your-openai-api-key-here
+
+### CSRF Configuration (optional, for production deployment)
+DJANGO_CSRF_TRUSTED_ORIGINS=https://yourdomain.com (put your production site)
+
+### OpenAI Model Names
+OPENAI_MODEL_NAME=gpt-4o-mini
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+
 ## Supported OS
 
 DiscussChat has first-class support for Linux systems. It is designed and tested primarily on Linux, ensuring the best performance and compatibility. While it may work on other operating systems, Linux is recommended for the most reliable experience.
