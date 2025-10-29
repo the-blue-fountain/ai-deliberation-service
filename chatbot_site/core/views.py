@@ -83,14 +83,56 @@ def generate_questions_api(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": "Topic is required"}, status=400)
 
     try:
+        session_obj: Optional[DiscussionSession] = None
+        session_id_value = data.get("session_id")
+        if session_id_value:
+            try:
+                session_obj = DiscussionSession.objects.get(pk=int(session_id_value))
+            except (ValueError, TypeError, DiscussionSession.DoesNotExist):
+                session_obj = None
+
+        knowledge_base = (data.get("knowledge_base") or "").strip()
+        existing_questions_raw = data.get("current_questions") or []
+        if not isinstance(existing_questions_raw, list):
+            existing_questions_raw = []
+        existing_questions = [str(item).strip() for item in existing_questions_raw if str(item).strip()]
+
+        rag_context_chunks: list[str] = []
+        if session_obj is not None:
+            try:
+                rag_snippets = RagService(session_obj).retrieve(topic, top_k=4)
+            except Exception:
+                rag_snippets = []
+            for chunk in rag_snippets:
+                text = (chunk.text or "").strip()
+                if not text:
+                    continue
+                if len(text) > 400:
+                    text = text[:400].rstrip() + "..."
+                rag_context_chunks.append(f"- {text}")
+
+        if not rag_context_chunks and knowledge_base:
+            snippet = knowledge_base.strip()
+            if len(snippet) > 1500:
+                snippet = snippet[:1500].rstrip() + "\n... (truncated)"
+            rag_context_chunks.append(snippet)
+
         client = get_openai_client()
         system = (
             "You are a helpful assistant that creates short, objective, neutral discussion questions. "
-            "Given a topic, produce exactly four concise objective questions suitable for asking participants. "
+            "Given a topic and optional background excerpts, produce exactly four concise objective questions suitable for asking participants. "
+            "Avoid reusing any questions that the moderator already selected. "
             "Return ONLY a JSON object with a 'questions' key containing an array of 4 question strings. "
             "Example format: {\"questions\": [\"question 1\", \"question 2\", \"question 3\", \"question 4\"]}"
         )
-        user = f"Topic: {topic}\n\nGenerate 4 short objective questions."
+        user_sections = [f"Topic: {topic}"]
+        if existing_questions:
+            existing_block = "\n".join(f"- {question}" for question in existing_questions)
+            user_sections.append("Existing questions to avoid repeating:\n" + existing_block)
+        if rag_context_chunks:
+            user_sections.append("Relevant background excerpts:\n" + "\n".join(rag_context_chunks))
+        user_sections.append("Generate 4 short objective questions.")
+        user = "\n\n".join(user_sections)
         completion = client.chat.completions.create(
             model=settings.OPENAI_MODEL_NAME,
             messages=[
@@ -272,14 +314,33 @@ def moderator_dashboard(request: HttpRequest) -> HttpResponse:
 
 def user_conversation(request: HttpRequest, user_id: int) -> HttpResponse:
     session = DiscussionSession.get_active()
-    # Determine the per-user objective/question for this participant
-    question = session.get_objective_for_user(user_id) if session else ""
-    if not question:
+    conversation, _ = UserConversation.objects.get_or_create(session=session, user_id=user_id)
+
+    # Determine the current question context for this participant
+    question_sequence = session.get_question_sequence() if session else []
+    current_question = session.get_objective_for_user(user_id, conversation=conversation) if session else ""
+    question_total = len(question_sequence)
+    current_index = conversation.current_question_index
+    if current_question:
+        question_position = min(current_index + 1, question_total)
+    elif question_total:
+        question_position = question_total
+    else:
+        question_position = 0
+
+    if session and not current_question and conversation.active and question_total == 0:
         messages.info(
             request,
-            "The moderator has not provided your question yet. Please wait before sharing details.",
+            "The moderator has not provided questions yet. Please wait before sharing details.",
         )
-    conversation, _ = UserConversation.objects.get_or_create(session=session, user_id=user_id)
+
+    next_question = ""
+    if conversation.active and question_total and current_index + 1 < question_total:
+        next_question = question_sequence[current_index + 1]
+
+    followup_limit = session.question_followup_limit if session else 0
+    followups_used = conversation.question_followups if current_question else 0
+    followups_remaining = max(followup_limit - followups_used, 0) if followup_limit else 0
 
     temp_snapshot = conversation.scratchpad or ""
     views_snapshot = conversation.views_markdown or ""
@@ -350,6 +411,13 @@ def user_conversation(request: HttpRequest, user_id: int) -> HttpResponse:
         "temp_snapshot": temp_snapshot,
         "views_snapshot": views_snapshot,
         "topic": session.topic,
-        "question": question,
+        "question": current_question,
+        "question_sequence": question_sequence,
+        "question_total": question_total,
+        "question_position": question_position,
+        "question_next": next_question,
+        "question_followup_limit": followup_limit,
+        "question_followups_used": followups_used,
+        "question_followups_remaining": followups_remaining,
     }
     return render(request, "core/user_conversation.html", context)

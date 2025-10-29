@@ -18,8 +18,9 @@ class DiscussionSession(models.Model):
 
 	s_id = models.CharField(max_length=100, unique=True)
 	moderator_id = models.IntegerField(default=0)
-	# The number of users is no longer stored. A single objective_question is used for all participants.
-	objective_question = models.TextField(blank=True, null=True)
+	# The number of users is no longer stored. Keep an ordered list of objective questions.
+	objective_questions = JSONField(blank=True, default=list)
+	question_followup_limit = models.PositiveIntegerField(default=3)
 
 	info = JSONField(blank=True, null=True)
 	results = JSONField(blank=True, null=True)

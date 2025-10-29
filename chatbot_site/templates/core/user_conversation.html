@@ -7,7 +7,19 @@
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <h2 class="fs-4 mb-1">Question</h2>
-                    <p class="lead mb-0">{{ question|default:"No question configured for you yet." }}</p>
+                    {% if question %}
+                        {% if question_total > 0 %}
+                            <p class="small text-muted mb-1">Question {{ question_position }} of {{ question_total }}</p>
+                        {% endif %}
+                        <p class="lead mb-0">{{ question }}</p>
+                        {% if question_followup_limit %}
+                            <p class="small text-muted mt-2 mb-0">Responses remaining for this question: {{ question_followups_remaining }} of {{ question_followup_limit }}</p>
+                        {% endif %}
+                    {% elif question_total > 0 %}
+                        <p class="lead mb-0">All moderator questions have been completed. Thank you for your contributions.</p>
+                    {% else %}
+                        <p class="lead mb-0">No question configured for you yet.</p>
+                    {% endif %}
                 </div>
                 <div class="text-end">
                     <span class="badge text-bg-info mb-2">Session {{ session.s_id }}</span>

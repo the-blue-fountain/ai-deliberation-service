@@ -32,17 +32,73 @@
             <form method="post" novalidate>
                 {% csrf_token %}
                 {{ session_form.non_field_errors }}
-                {{ session_form.as_p }}
+
                 <div class="mb-3">
-                    <button type="button" class="btn btn-outline-info" id="generateQuestionsBtn">Generate Questions</button>
-                    <small class="text-muted ms-2">Ask the AI to suggest 4 objective questions for the current topic.</small>
+                    {{ session_form.s_id.label_tag }}
+                    {{ session_form.s_id }}
+                    {% if session_form.s_id.help_text %}<div class="form-text">{{ session_form.s_id.help_text }}</div>{% endif %}
+                    {% for error in session_form.s_id.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
+
+                <div class="mb-3">
+                    {{ session_form.topic.label_tag }}
+                    {{ session_form.topic }}
+                    {% if session_form.topic.help_text %}<div class="form-text">{{ session_form.topic.help_text }}</div>{% endif %}
+                    {% for error in session_form.topic.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+
+                <div class="mb-3">
+                    {{ session_form.question_followup_limit.label_tag }}
+                    {{ session_form.question_followup_limit }}
+                    {% if session_form.question_followup_limit.help_text %}<div class="form-text">{{ session_form.question_followup_limit.help_text }}</div>{% endif %}
+                    {% for error in session_form.question_followup_limit.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+
+                {{ session_form.objective_questions }}
+                <div class="mb-3" id="questionBuilder" data-session-id="{{ selected_session.pk|default:'' }}">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <label class="form-label mb-0">Objective Questions</label>
+                        <button type="button" class="btn btn-sm btn-outline-info" id="generateQuestionsBtn">Generate Suggestions</button>
+                    </div>
+                    <p class="form-text">Questions are asked in the order shown below. Reorder or remove them to shape the discussion flow.</p>
+                    <div id="questionList" class="list-group mb-3"></div>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="manualQuestionInput" placeholder="Type a new question and click Add">
+                        <button type="button" class="btn btn-outline-primary" id="addManualQuestionBtn">Add</button>
+                    </div>
+                    <div class="form-text mt-2">Drag-and-drop is not required—use the controls beside each question to reorder.</div>
+                    {% for error in session_form.objective_questions.errors %}
+                        <div class="text-danger small mt-2">{{ error }}</div>
+                    {% endfor %}
+                </div>
+
                 <div id="generatedQuestions" class="mb-3 d-none">
-                    <label class="form-label">AI suggestions</label>
+                    <label class="form-label">AI Suggestions</label>
                     <div id="suggestionsList" class="list-group"></div>
-                    <div class="form-text mt-2">Click one suggestion to insert it into the Objective question field, or click "None of these" to enter your own.</div>
-                    <button type="button" id="noneOfTheseBtn" class="btn btn-sm btn-link mt-2">None of these</button>
+                    <div class="form-text mt-2">Click "Add" on any suggestion to include it in your question list.</div>
                 </div>
+
+                <div class="mb-3">
+                    {{ session_form.knowledge_base.label_tag }}
+                    {{ session_form.knowledge_base }}
+                    {% if session_form.knowledge_base.help_text %}<div class="form-text">{{ session_form.knowledge_base.help_text }}</div>{% endif %}
+                    {% for error in session_form.knowledge_base.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+
+                <div class="mb-3">
+                    {{ session_form.user_system_prompt.label_tag }}
+                    {{ session_form.user_system_prompt }}
+                    {% if session_form.user_system_prompt.help_text %}<div class="form-text">{{ session_form.user_system_prompt.help_text }}</div>{% endif %}
+                    {% for error in session_form.user_system_prompt.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+
+                <div class="mb-3">
+                    {{ session_form.moderator_system_prompt.label_tag }}
+                    {{ session_form.moderator_system_prompt }}
+                    {% if session_form.moderator_system_prompt.help_text %}<div class="form-text">{{ session_form.moderator_system_prompt.help_text }}</div>{% endif %}
+                    {% for error in session_form.moderator_system_prompt.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+
                 <div class="d-flex flex-wrap gap-2 mt-3">
                     <button type="submit" class="btn btn-primary" name="action" value="save_session" {% if not selected_session %}disabled{% endif %}>Save Changes</button>
                     <button type="submit" class="btn btn-outline-primary" name="action" value="create_session">Save As New</button>
@@ -274,85 +330,194 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Generate Questions flow
-    const genBtn = document.getElementById('generateQuestionsBtn');
+    const hiddenField = document.getElementById('id_objective_questions');
+    const listEl = document.getElementById('questionList');
+    const addBtn = document.getElementById('addManualQuestionBtn');
+    const inputEl = document.getElementById('manualQuestionInput');
+    const generateBtn = document.getElementById('generateQuestionsBtn');
     const suggestionsContainer = document.getElementById('generatedQuestions');
     const suggestionsList = document.getElementById('suggestionsList');
-    const noneBtn = document.getElementById('noneOfTheseBtn');
+    const builderEl = document.getElementById('questionBuilder');
+    const knowledgeField = document.getElementById('id_knowledge_base');
+    const topicField = document.getElementById('id_topic');
 
-    if (genBtn) {
-        genBtn.addEventListener('click', async function(e) {
-            e.preventDefault();
-            const topicInput = document.getElementById('id_topic');
-            const topic = topicInput ? topicInput.value.trim() : '';
+    let questions = [];
+
+    const syncHiddenField = () => {
+        if (hiddenField) {
+            hiddenField.value = JSON.stringify(questions);
+        }
+    };
+
+    const renderQuestions = () => {
+        if (!listEl) return;
+        syncHiddenField();
+        listEl.innerHTML = '';
+        if (!questions.length) {
+            const emptyState = document.createElement('div');
+            emptyState.className = 'list-group-item text-muted';
+            emptyState.textContent = 'No questions configured yet.';
+            listEl.appendChild(emptyState);
+            return;
+        }
+
+        questions.forEach((text, index) => {
+            const item = document.createElement('div');
+            item.className = 'list-group-item d-flex align-items-start justify-content-between gap-2';
+
+            const label = document.createElement('div');
+            label.className = 'flex-grow-1';
+            label.textContent = `${index + 1}. ${text}`;
+            item.appendChild(label);
+
+            const controls = document.createElement('div');
+            controls.className = 'btn-group btn-group-sm';
+
+            const upBtn = document.createElement('button');
+            upBtn.type = 'button';
+            upBtn.className = 'btn btn-outline-secondary';
+            upBtn.innerText = 'Up';
+            upBtn.disabled = index === 0;
+            upBtn.addEventListener('click', () => {
+                if (index === 0) return;
+                const target = questions.splice(index, 1)[0];
+                questions.splice(index - 1, 0, target);
+                renderQuestions();
+            });
+
+            const downBtn = document.createElement('button');
+            downBtn.type = 'button';
+            downBtn.className = 'btn btn-outline-secondary';
+            downBtn.innerText = 'Down';
+            downBtn.disabled = index === questions.length - 1;
+            downBtn.addEventListener('click', () => {
+                if (index === questions.length - 1) return;
+                const target = questions.splice(index, 1)[0];
+                questions.splice(index + 1, 0, target);
+                renderQuestions();
+            });
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'btn btn-outline-danger';
+            removeBtn.innerText = 'Remove';
+            removeBtn.addEventListener('click', () => {
+                questions.splice(index, 1);
+                renderQuestions();
+            });
+
+            controls.appendChild(upBtn);
+            controls.appendChild(downBtn);
+            controls.appendChild(removeBtn);
+            item.appendChild(controls);
+
+            listEl.appendChild(item);
+        });
+    };
+
+    const addQuestion = (text) => {
+        const trimmed = (text || '').trim();
+        if (!trimmed) return;
+        questions.push(trimmed);
+        renderQuestions();
+    };
+
+    const hydrateQuestions = () => {
+        if (!hiddenField) return;
+        try {
+            const initial = hiddenField.value ? JSON.parse(hiddenField.value) : [];
+            if (Array.isArray(initial)) {
+                questions = initial.map(entry => String(entry).trim()).filter(Boolean);
+            }
+        } catch (err) {
+            questions = [];
+        }
+        renderQuestions();
+    };
+
+    hydrateQuestions();
+
+    if (addBtn && inputEl) {
+        addBtn.addEventListener('click', () => {
+            addQuestion(inputEl.value);
+            inputEl.value = '';
+            inputEl.focus();
+        });
+        inputEl.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                addBtn.click();
+            }
+        });
+    }
+
+    if (generateBtn) {
+        generateBtn.addEventListener('click', async (event) => {
+            event.preventDefault();
+            const topic = topicField ? topicField.value.trim() : '';
             if (!topic) {
                 alert('Please enter a topic before generating questions.');
                 return;
             }
-            genBtn.disabled = true;
-            genBtn.textContent = 'Generating...';
+
+            generateBtn.disabled = true;
+            generateBtn.textContent = 'Generating...';
             try {
                 const csrfToken = document.querySelector('[name="csrfmiddlewaretoken"]').value;
-                const res = await fetch('{% url "generate_questions_api" %}', {
+                const payload = { topic, current_questions: questions };
+                if (builderEl && builderEl.dataset.sessionId) {
+                    payload.session_id = builderEl.dataset.sessionId;
+                }
+                if (knowledgeField) {
+                    payload.knowledge_base = knowledgeField.value || '';
+                }
+                const response = await fetch('{% url "generate_questions_api" %}', {
                     method: 'POST',
                     headers: {
                         'X-CSRFToken': csrfToken,
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ topic }),
+                    body: JSON.stringify(payload),
                 });
-                const data = await res.json();
-                genBtn.disabled = false;
-                genBtn.textContent = 'Generate Questions';
+                const data = await response.json();
                 if (!data.success) {
-                    alert(data.error || 'Failed to generate suggestions.');
-                    return;
+                    throw new Error(data.error || 'Failed to generate suggestions.');
                 }
-                // Populate suggestions
+
+                const suggestions = Array.isArray(data.questions) ? data.questions : [];
                 suggestionsList.innerHTML = '';
-                const questions = data.questions || [];
-                if (questions.length === 0) {
-                    suggestionsList.innerHTML = '<div class="list-group-item">No suggestions returned.</div>';
+                if (!suggestions.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'list-group-item text-muted';
+                    empty.textContent = 'No suggestions returned.';
+                    suggestionsList.appendChild(empty);
                 } else {
-                    questions.forEach(function(q, idx) {
-                        const item = document.createElement('button');
-                        item.type = 'button';
-                        item.className = 'list-group-item list-group-item-action';
-                        item.textContent = q;
-                        item.addEventListener('click', function() {
-                            const objField = document.getElementById('id_objective_question');
-                            if (objField) {
-                                objField.value = q;
-                            }
-                        });
+                    suggestions.forEach((suggestion) => {
+                        const item = document.createElement('div');
+                        item.className = 'list-group-item d-flex justify-content-between align-items-center gap-2';
+
+                        const textNode = document.createElement('div');
+                        textNode.className = 'flex-grow-1';
+                        textNode.textContent = suggestion;
+
+                        const addSuggestionBtn = document.createElement('button');
+                        addSuggestionBtn.type = 'button';
+                        addSuggestionBtn.className = 'btn btn-sm btn-outline-primary';
+                        addSuggestionBtn.textContent = 'Add';
+                        addSuggestionBtn.addEventListener('click', () => addQuestion(suggestion));
+
+                        item.appendChild(textNode);
+                        item.appendChild(addSuggestionBtn);
                         suggestionsList.appendChild(item);
                     });
-                    // Add 'None of these' as last option
-                    const noneItem = document.createElement('button');
-                    noneItem.type = 'button';
-                    noneItem.className = 'list-group-item list-group-item-action text-muted';
-                    noneItem.textContent = 'None of these — I will enter my own question';
-                    noneItem.addEventListener('click', function() {
-                        const objField = document.getElementById('id_objective_question');
-                        if (objField) {
-                            objField.focus();
-                        }
-                    });
-                    suggestionsList.appendChild(noneItem);
                 }
                 suggestionsContainer.classList.remove('d-none');
-            } catch (err) {
-                genBtn.disabled = false;
-                genBtn.textContent = 'Generate Questions';
-                alert('Error: ' + err.message);
+            } catch (error) {
+                alert('Error generating questions: ' + error.message);
+            } finally {
+                generateBtn.disabled = false;
+                generateBtn.textContent = 'Generate Suggestions';
             }
-        });
-    }
-
-    if (noneBtn) {
-        noneBtn.addEventListener('click', function() {
-            const objField = document.getElementById('id_objective_question');
-            if (objField) objField.focus();
         });
     }
 });

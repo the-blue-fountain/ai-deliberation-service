@@ -26,9 +26,9 @@ class DiscussionSession(models.Model):
     """Represents a full moderator-led discussion workflow."""
 
     s_id = models.CharField(max_length=64, unique=True)
-    # A single objective question that will be given to all participants.
-    # The system no longer asks moderators to provide a number of users.
-    objective_question = models.TextField(blank=True)
+    # Ordered collection of objective questions shared by all participants.
+    objective_questions = models.JSONField(default=list, blank=True)
+    question_followup_limit = models.PositiveIntegerField(default=3)
     topic = models.CharField(max_length=255, blank=True)
     user_system_prompt = models.TextField(
         blank=True,
@@ -63,13 +63,42 @@ class DiscussionSession(models.Model):
             self.is_active = True
             self.save(update_fields=["is_active"])
 
-    def get_objective_for_user(self, user_id: int) -> str:
-        """Return the current objective question for participants.
+    def get_question_sequence(self) -> list[str]:
+        """Return the ordered list of objective questions for this session."""
 
-        The platform now uses a single objective question shared by all users.
-        The user_id is ignored but kept for API compatibility.
+        questions = []
+        for entry in self.objective_questions or []:
+            if isinstance(entry, str):
+                candidate = entry.strip()
+            else:
+                candidate = str(entry).strip()
+            if candidate:
+                questions.append(candidate)
+        return questions
+
+    def get_question_count(self) -> int:
+        return len(self.get_question_sequence())
+
+    def get_question_at(self, index: int) -> str:
+        sequence = self.get_question_sequence()
+        if 0 <= index < len(sequence):
+            return sequence[index]
+        return ""
+
+    def get_objective_for_user(self, user_id: int, *, conversation: "UserConversation | None" = None) -> str:
+        """Return the active objective question for the participant.
+
+        If a conversation instance is supplied (or found via user_id), the current
+        question index will be used. Otherwise, the first question (if any) is
+        returned. Maintains API compatibility with legacy callers.
         """
-        return (self.objective_question or "").strip()
+
+        target_conversation = conversation
+        if target_conversation is None:
+            target_conversation = self.conversations.filter(user_id=user_id).first()
+        if target_conversation is not None:
+            return self.get_question_at(target_conversation.current_question_index)
+        return self.get_question_at(0)
 
     @classmethod
     def get_active(cls) -> "DiscussionSession":
@@ -78,7 +107,12 @@ class DiscussionSession(models.Model):
         session = cls.objects.active().first()
         if session:
             return session
-        return cls.objects.create(s_id="default")
+        return cls.objects.create(
+            s_id="default",
+            topic="Default Discussion",
+            objective_questions=[],
+            question_followup_limit=3,
+        )
 
 
 class UserConversation(models.Model):
@@ -96,6 +130,8 @@ class UserConversation(models.Model):
     message_count = models.PositiveIntegerField(default=0)
     consecutive_no_new = models.PositiveIntegerField(default=0)
     active = models.BooleanField(default=True)
+    current_question_index = models.PositiveIntegerField(default=0)
+    question_followups = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

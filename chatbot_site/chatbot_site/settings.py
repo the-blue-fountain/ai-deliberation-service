@@ -37,9 +37,19 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-)ew(-bf+-p*xw=
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('1', 'true', 'yes')
 
-# Allow all hosts for this demo project
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
-ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS]
+# Allow hosts from environment, but always include safe local defaults for development
+raw_allowed_hosts = os.environ.get('ALLOWED_HOSTS', '')
+if raw_allowed_hosts:
+    parsed_hosts = [host.strip() for host in raw_allowed_hosts.split(',') if host.strip()]
+else:
+    parsed_hosts = []
+
+default_dev_hosts = ['localhost', '127.0.0.1']
+for host in default_dev_hosts:
+    if host not in parsed_hosts:
+        parsed_hosts.append(host)
+
+ALLOWED_HOSTS = parsed_hosts
 
 
 # Application definition

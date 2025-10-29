@@ -21,13 +21,13 @@ The platform consists of several key parts that work together:
    - User conversations: Each participant's chat history, notes taken during the discussion, and a final summary of their views.
    - Analysis results: Synthesized insights from all participants, highlighting areas of agreement, disagreement, and gaps in understanding.
 
-Important note: The platform no longer requires moderators to specify how many participants will join. Moderators provide a topic and an objective question (or use the "Generate Questions" helper) and the same question is presented to every participant. This makes it effortless to add participants at any time.
+Important note: The platform no longer requires moderators to specify how many participants will join. Moderators provide a topic and build an ordered set of objective questions (or use the "Generate Questions" helper) that every participant will move through in the same sequence. This makes it effortless to add participants at any time while keeping everyone aligned on the conversation flow.
 
 ### How a Discussion Works
 
 1. **Setup Phase**: A moderator creates a new discussion session by choosing a topic and optionally providing background information or custom instructions for the AI.
 
-2. **Question generation & Participant Phase**: After creating a session, the moderator can press "Generate Questions" to ask the AI to propose four short, objective candidate questions based on the topic. The moderator selects one of those questions (or chooses "None of these" and types their own). That single objective question is then given to every participant. Participants can join at any time and will see the same question when they answer.
+2. **Question generation & Participant Phase**: After creating a session, the moderator can press "Generate Questions" to ask the AI to propose four short, objective candidate questions based on the topic and retrieved knowledge-base excerpts. The moderator can add any combination of these suggestions, mix in custom questions, and arrange them in the preferred order. A per-question follow-up limit determines how many participant responses the AI explores before automatically advancing to the next question in the list. Participants can join at any time and progress through the same ordered question set.
 
 3. **Synthesis Phase**: Once participants finish sharing, the AI combines everyone's individual summaries into a comprehensive overview. This highlights common ground, differences of opinion, strong feelings, and areas that need more clarification.
 

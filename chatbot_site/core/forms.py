@@ -1,3 +1,5 @@
+import json
+
 from django import forms
 
 from .models import DiscussionSession
@@ -8,11 +10,15 @@ class ParticipantIdForm(forms.Form):
 
 
 class DiscussionSessionForm(forms.ModelForm):
-    # Single objective question shared by all participants.
-    objective_question = forms.CharField(
-        widget=forms.Textarea(attrs={"rows": 3, "class": "form-control", "placeholder": "Objective question for all participants (leave blank to generate)"}),
+    objective_questions = forms.CharField(
+        widget=forms.HiddenInput(),
         required=False,
-        label="Objective question",
+    )
+    question_followup_limit = forms.IntegerField(
+        min_value=1,
+        initial=3,
+        label="Follow-up limit per question",
+        help_text="Maximum number of participant replies to explore before moving to the next question.",
     )
 
     class Meta:
@@ -20,7 +26,8 @@ class DiscussionSessionForm(forms.ModelForm):
         fields = [
             "s_id",
             "topic",
-            "objective_question",
+            "question_followup_limit",
+            "objective_questions",
             "knowledge_base",
             "user_system_prompt",
             "moderator_system_prompt",
@@ -28,7 +35,6 @@ class DiscussionSessionForm(forms.ModelForm):
         widgets = {
             "s_id": forms.TextInput(attrs={"class": "form-control", "placeholder": "Unique session identifier"}),
             "topic": forms.TextInput(attrs={"class": "form-control"}),
-            "objective_question": forms.Textarea(attrs={"rows": 3, "class": "form-control"}),
             "knowledge_base": forms.Textarea(
                 attrs={"rows": 8, "class": "form-control", "placeholder": "Moderator knowledge base for RAG"}
             ),
@@ -38,17 +44,40 @@ class DiscussionSessionForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Initialize objective_question from instance
-        if self.instance and getattr(self.instance, "objective_question", None):
-            self.fields["objective_question"].initial = str(self.instance.objective_question)
+        sequence = []
+        if self.instance and self.instance.pk:
+            sequence = self.instance.get_question_sequence()
+            if self.instance.question_followup_limit:
+                self.fields["question_followup_limit"].initial = self.instance.question_followup_limit
+        if not sequence:
+            sequence = []
+        self.fields["objective_questions"].initial = json.dumps(sequence)
 
     def save(self, commit=True):
         instance = super().save(commit=False)
-        # objective_question is managed by the form field
-        instance.objective_question = self.cleaned_data.get("objective_question") or ""
+        instance.objective_questions = self.cleaned_data.get("objective_questions", [])
+        instance.question_followup_limit = self.cleaned_data.get("question_followup_limit")
         if commit:
             instance.save()
         return instance
+
+    def clean_objective_questions(self):
+        raw = self.cleaned_data.get("objective_questions")
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise forms.ValidationError("Unable to decode question list.") from exc
+        if not isinstance(parsed, list):
+            raise forms.ValidationError("Question list must be an array of strings.")
+
+        cleaned: list[str] = []
+        for entry in parsed:
+            text = str(entry).strip()
+            if text:
+                cleaned.append(text)
+        return cleaned
 
 
 class SessionSelectionForm(forms.Form):
