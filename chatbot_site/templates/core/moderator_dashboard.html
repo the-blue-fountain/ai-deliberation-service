@@ -54,6 +54,13 @@
                     {% for error in session_form.question_followup_limit.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
 
+                <div class="mb-3">
+                    {{ session_form.no_new_information_limit.label_tag }}
+                    {{ session_form.no_new_information_limit }}
+                    {% if session_form.no_new_information_limit.help_text %}<div class="form-text">{{ session_form.no_new_information_limit.help_text }}</div>{% endif %}
+                    {% for error in session_form.no_new_information_limit.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+
                 {{ session_form.objective_questions }}
                 <div class="mb-3" id="questionBuilder" data-session-id="{{ selected_session.pk|default:'' }}">
                     <div class="d-flex justify-content-between align-items-center mb-2">

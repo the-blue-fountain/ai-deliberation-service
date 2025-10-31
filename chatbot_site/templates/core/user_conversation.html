@@ -15,6 +15,9 @@
                         {% if question_followup_limit %}
                             <p class="small text-muted mt-2 mb-0">Responses remaining for this question: {{ question_followups_remaining }} of {{ question_followup_limit }}</p>
                         {% endif %}
+                        {% if no_new_information_limit %}
+                            <p class="small text-muted mt-1 mb-0">Consecutive responses without new information before auto-advance: {{ no_new_information_remaining }} of {{ no_new_information_limit }}</p>
+                        {% endif %}
                     {% elif question_total > 0 %}
                         <p class="lead mb-0">All moderator questions have been completed. Thank you for your contributions.</p>
                     {% else %}

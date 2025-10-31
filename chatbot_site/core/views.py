@@ -317,31 +317,6 @@ def user_conversation(request: HttpRequest, user_id: int) -> HttpResponse:
     conversation, _ = UserConversation.objects.get_or_create(session=session, user_id=user_id)
 
     # Determine the current question context for this participant
-    question_sequence = session.get_question_sequence() if session else []
-    current_question = session.get_objective_for_user(user_id, conversation=conversation) if session else ""
-    question_total = len(question_sequence)
-    current_index = conversation.current_question_index
-    if current_question:
-        question_position = min(current_index + 1, question_total)
-    elif question_total:
-        question_position = question_total
-    else:
-        question_position = 0
-
-    if session and not current_question and conversation.active and question_total == 0:
-        messages.info(
-            request,
-            "The moderator has not provided questions yet. Please wait before sharing details.",
-        )
-
-    next_question = ""
-    if conversation.active and question_total and current_index + 1 < question_total:
-        next_question = question_sequence[current_index + 1]
-
-    followup_limit = session.question_followup_limit if session else 0
-    followups_used = conversation.question_followups if current_question else 0
-    followups_remaining = max(followup_limit - followups_used, 0) if followup_limit else 0
-
     temp_snapshot = conversation.scratchpad or ""
     views_snapshot = conversation.views_markdown or ""
 
@@ -383,6 +358,7 @@ def user_conversation(request: HttpRequest, user_id: int) -> HttpResponse:
                         "reasoning_notes": result.reasoning_notes,
                         "ended": result.ended,
                         "final_views_md": result.final_views_md,
+                        "end_reason": result.end_reason,
                     }
                     temp_snapshot = conversation.scratchpad
                     if result.final_views_md is not None:
@@ -390,17 +366,54 @@ def user_conversation(request: HttpRequest, user_id: int) -> HttpResponse:
                     form = UserMessageForm()
 
                     if result.ended:
-                        if conversation.consecutive_no_new >= 2:
+                        end_reason = result.end_reason or ""
+                        if end_reason == "no_new_limit":
                             messages.info(
                                 request,
-                                "Conversation closed after two consecutive responses without new information.",
+                                "Conversation closed after reaching the moderator-defined limit for consecutive responses without new information on the final question.",
                             )
-                        elif conversation.message_count >= 15:
+                        elif end_reason == "followup_limit":
+                            messages.info(
+                                request,
+                                "Conversation closed after reaching the moderator-defined follow-up limit on the final question.",
+                            )
+                        elif end_reason == "message_limit":
                             messages.info(request, "Conversation closed after reaching the 15 message limit.")
+                        else:
+                            messages.info(request, "Conversation closed.")
             else:
                 messages.error(request, "Please enter a response before submitting.")
     else:
         form = UserMessageForm()
+
+    question_sequence = session.get_question_sequence() if session else []
+    current_question = session.get_objective_for_user(user_id, conversation=conversation) if session else ""
+    question_total = len(question_sequence)
+    current_index = conversation.current_question_index
+    if current_question:
+        question_position = min(current_index + 1, question_total)
+    elif question_total:
+        question_position = question_total
+    else:
+        question_position = 0
+
+    if session and not current_question and conversation.active and question_total == 0:
+        messages.info(
+            request,
+            "The moderator has not provided questions yet. Please wait before sharing details.",
+        )
+
+    next_question = ""
+    if conversation.active and question_total and current_index + 1 < question_total:
+        next_question = question_sequence[current_index + 1]
+
+    followup_limit = session.question_followup_limit if session else 0
+    followups_used = conversation.question_followups if current_question else 0
+    followups_remaining = max(followup_limit - followups_used, 0) if followup_limit else 0
+
+    no_new_limit = session.no_new_information_limit if session else 0
+    no_new_streak = conversation.consecutive_no_new if current_question else 0
+    no_new_remaining = max(no_new_limit - no_new_streak, 0) if no_new_limit else 0
 
     context = {
         "session": session,
@@ -419,5 +432,7 @@ def user_conversation(request: HttpRequest, user_id: int) -> HttpResponse:
         "question_followup_limit": followup_limit,
         "question_followups_used": followups_used,
         "question_followups_remaining": followups_remaining,
+        "no_new_information_limit": no_new_limit,
+        "no_new_information_remaining": no_new_remaining,
     }
     return render(request, "core/user_conversation.html", context)

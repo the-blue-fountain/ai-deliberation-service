@@ -29,6 +29,7 @@ class DiscussionSession(models.Model):
     # Ordered collection of objective questions shared by all participants.
     objective_questions = models.JSONField(default=list, blank=True)
     question_followup_limit = models.PositiveIntegerField(default=3)
+    no_new_information_limit = models.PositiveIntegerField(default=2)
     topic = models.CharField(max_length=255, blank=True)
     user_system_prompt = models.TextField(
         blank=True,
@@ -112,6 +113,7 @@ class DiscussionSession(models.Model):
             topic="Default Discussion",
             objective_questions=[],
             question_followup_limit=3,
+            no_new_information_limit=2,
         )
 
 

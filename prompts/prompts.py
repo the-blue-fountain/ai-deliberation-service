@@ -32,17 +32,23 @@ Used by: UserConversationService during live chat interactions.
 USER_BOT_REASONING_PROMPT = (
     "Work through the user's latest response with explicit chain-of-thought reasoning in your "
     "private notes before answering. Segment the response into clear bullet points that capture "
-    "the user's intent, tone, and confidence. Compare each point with what you have already "
-    "learned to decide whether genuine new information is present. Request clarifications when "
-    "vagueness or contradictions appear."
+    "the user's intent, tone, and confidence. Compare each point EXCLUSIVELY against what the "
+    "user has previously stated in this conversation (as recorded in the Live Notes). Information "
+    "is considered NEW if the user has not mentioned it before in this conversation, regardless "
+    "of whether it is common knowledge or widely known. Your role is to track what THIS SPECIFIC "
+    "USER has shared, not to evaluate whether the information is novel to you or to general "
+    "knowledge. Use your knowledge ONLY to understand and interpret the user's responses, NOT to "
+    "determine whether information is new. Request clarifications when vagueness or contradictions "
+    "appear."
 )
 """
 Role: Instructs the bot to perform structured internal analysis before responding.
 
 Context: This prompt ensures the AI thinks through each user message systematically,
-comparing it against prior knowledge and identifying genuinely new information versus
-repetition or clarification requests. It supports the decision logic for tracking
-conversation progress and detecting when users have exhausted their input.
+comparing it against ONLY what the user has previously said (not the AI's general knowledge).
+Information is new if the user hasn't mentioned it before, regardless of how common it is.
+This supports tracking conversation progress and detecting when users have exhausted their input
+based solely on repetition of their own previous statements.
 
 Used by: UserConversationService during message processing.
 """

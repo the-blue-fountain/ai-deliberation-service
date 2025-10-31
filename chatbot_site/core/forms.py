@@ -20,6 +20,12 @@ class DiscussionSessionForm(forms.ModelForm):
         label="Follow-up limit per question",
         help_text="Maximum number of participant replies to explore before moving to the next question.",
     )
+    no_new_information_limit = forms.IntegerField(
+        min_value=1,
+        initial=2,
+        label="Consecutive 'no new info' limit",
+        help_text="Number of responses without new information before the assistant advances or closes a question.",
+    )
 
     class Meta:
         model = DiscussionSession
@@ -27,6 +33,7 @@ class DiscussionSessionForm(forms.ModelForm):
             "s_id",
             "topic",
             "question_followup_limit",
+            "no_new_information_limit",
             "objective_questions",
             "knowledge_base",
             "user_system_prompt",
@@ -49,6 +56,8 @@ class DiscussionSessionForm(forms.ModelForm):
             sequence = self.instance.get_question_sequence()
             if self.instance.question_followup_limit:
                 self.fields["question_followup_limit"].initial = self.instance.question_followup_limit
+            if self.instance.no_new_information_limit:
+                self.fields["no_new_information_limit"].initial = self.instance.no_new_information_limit
         if not sequence:
             sequence = []
         self.fields["objective_questions"].initial = json.dumps(sequence)
@@ -57,6 +66,7 @@ class DiscussionSessionForm(forms.ModelForm):
         instance = super().save(commit=False)
         instance.objective_questions = self.cleaned_data.get("objective_questions", [])
         instance.question_followup_limit = self.cleaned_data.get("question_followup_limit")
+        instance.no_new_information_limit = self.cleaned_data.get("no_new_information_limit")
         if commit:
             instance.save()
         return instance
