@@ -1,5 +1,5 @@
 openai-api-key.txt
-
+.github/
 # Environment variables
 .env*
 .env.local
