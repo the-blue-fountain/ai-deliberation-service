@@ -23,7 +23,7 @@ class DiscussionSessionQuerySet(models.QuerySet):
 
 
 class DiscussionSession(models.Model):
-    """Represents a full moderator-led discussion workflow."""
+    """Represents a full moderator-led discussion workflow (Human-AI deliberation)."""
 
     s_id = models.CharField(max_length=64, unique=True)
     # Ordered collection of objective questions shared by all participants.
@@ -31,6 +31,7 @@ class DiscussionSession(models.Model):
     question_followup_limit = models.PositiveIntegerField(default=3)
     no_new_information_limit = models.PositiveIntegerField(default=2)
     topic = models.CharField(max_length=255, blank=True)
+    description = models.TextField(blank=True, help_text="Detailed description (rendered as markdown for users)")
     user_system_prompt = models.TextField(
         blank=True,
         default=DEFAULT_USER_SYSTEM_PROMPT,
@@ -155,3 +156,118 @@ class UserConversation(models.Model):
 
     def __str__(self) -> str:
         return f"UserConversation<session={self.session_id}, user={self.user_id}>"
+
+
+class AIDeliberationSession(models.Model):
+    """Represents an AI-only deliberation session (AI-AI debate)."""
+
+    s_id = models.CharField(max_length=64, unique=True)
+    topic = models.CharField(max_length=255, blank=True)
+    description = models.TextField(blank=True, help_text="Detailed session description")
+    # Ordered collection of objective questions for the debate
+    objective_questions = models.JSONField(default=list, blank=True)
+    # List of personas (AI agent descriptions)
+    personas = models.JSONField(default=list, blank=True)
+    # Settings
+    system_prompt_template = models.TextField(
+        blank=True,
+        help_text="System prompt template (placeholders: {persona}, {question}, {opinions})",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at", "-id")
+
+    def __str__(self) -> str:
+        return f"AIDeliberationSession<{self.s_id}>"
+
+    def get_question_sequence(self) -> list[str]:
+        """Return the ordered list of objective questions for this session."""
+        questions = []
+        for entry in self.objective_questions or []:
+            if isinstance(entry, str):
+                candidate = entry.strip()
+            else:
+                candidate = str(entry).strip()
+            if candidate:
+                questions.append(candidate)
+        return questions
+
+    def get_personas(self) -> list[str]:
+        """Return the list of personas for this session."""
+        personas = []
+        for entry in self.personas or []:
+            if isinstance(entry, str):
+                candidate = entry.strip()
+            else:
+                candidate = str(entry).strip()
+            if candidate:
+                personas.append(candidate)
+        return personas
+
+    @classmethod
+    def get_active(cls) -> "AIDeliberationSession":
+        """Return the active AI session, creating a default if needed."""
+        session = cls.objects.filter(is_active=True).order_by("-updated_at").first()
+        if session:
+            return session
+        return cls.objects.create(
+            s_id="ai-default",
+            topic="Default AI Deliberation",
+            objective_questions=[],
+            personas=[],
+        )
+
+    def activate(self) -> None:
+        """Mark this session as the active one."""
+        type(self).objects.exclude(pk=self.pk).update(is_active=False)
+        if not self.is_active:
+            self.is_active = True
+            self.save(update_fields=["is_active"])
+
+
+class AIDebateRun(models.Model):
+    """Records a single run of an AI debate (the transcript)."""
+
+    session = models.ForeignKey(
+        AIDeliberationSession,
+        on_delete=models.CASCADE,
+        related_name="debate_runs",
+    )
+    # Debate transcript: list of turns with {question, persona, opinion, summary}
+    transcript = models.JSONField(default=list, blank=True)
+    completed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self) -> str:
+        return f"AIDebateRun<session={self.session_id}, completed={self.completed}>"
+
+
+class AIDebateSummary(models.Model):
+    """Stores the final summary of an AI debate."""
+
+    session = models.OneToOneField(
+        AIDeliberationSession,
+        on_delete=models.CASCADE,
+        related_name="summary",
+    )
+    topic = models.CharField(max_length=255, blank=True)
+    description = models.TextField(blank=True)
+    objective_questions = models.JSONField(default=list, blank=True)
+    personas = models.JSONField(default=list, blank=True)
+    summary_markdown = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = "AI Debate Summaries"
+
+    def __str__(self) -> str:
+        return f"AIDebateSummary<session={self.session_id}>"
+

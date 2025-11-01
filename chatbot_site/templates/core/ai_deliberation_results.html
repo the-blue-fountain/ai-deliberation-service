@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% load analysis_tags %}
+
+{% block content %}
+<div class="row gy-4">
+    <div class="col-12">
+        <div class="card content-card p-4 mb-4">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <div>
+                    <h2 class="fs-4 mb-1">{{ session.topic }}</h2>
+                    <p class="text-muted mb-0">{{ session.s_id }}</p>
+                </div>
+                <div class="text-end">
+                    {% if run.completed %}
+                        <span class="badge bg-success">Completed</span>
+                    {% else %}
+                        <span class="badge bg-warning">In Progress</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% if session.description %}
+                <div class="markdown-box mb-0">{{ session.description }}</div>
+            {% endif %}
+        </div>
+
+        {% if transcript_by_question %}
+        <div class="card content-card p-4 mb-4">
+            <h3 class="fs-5 mb-4">Debate Transcript</h3>
+            
+            {% for q_idx, question_data in transcript_by_question.items %}
+            <div class="mb-5">
+                <h4 class="fs-6 bg-light p-3 rounded mb-3">
+                    Question {{ q_idx|add:1 }}: {{ question_data.question }}
+                </h4>
+                
+                <div class="chat-container" style="max-height: 500px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 0.5rem; padding: 1rem;">
+                    {% for agent in question_data.agents %}
+                    <div class="mb-3 d-flex {% cycle 'flex-row' 'flex-row-reverse' %}">
+                        <div class="me-2">
+                            <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 40px; height: 40px; flex-shrink: 0;">
+                                <strong>{{ forloop.counter }}</strong>
+                            </div>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="bg-light p-3 rounded">
+                                <p class="mb-2"><strong>{{ agent.persona }}</strong></p>
+                                <p class="mb-0">{{ agent.opinion|linebreaks }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if summary %}
+        <div class="card content-card p-4 mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h3 class="fs-5 mb-0">Summary</h3>
+                <span class="badge bg-success">Generated</span>
+            </div>
+            <div class="markdown-box">{{ summary.summary_markdown|safe }}</div>
+        </div>
+        {% else %}
+        <div class="card content-card p-4 mb-4">
+            <h3 class="fs-5 mb-3">Generate Summary</h3>
+            <p class="text-muted mb-3">Review the debate above and generate a comprehensive summary.</p>
+            <form method="post" novalidate>
+                {% csrf_token %}
+                <button type="submit" name="action" value="summarize" class="btn btn-primary" {% if not run.completed %}disabled{% endif %}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-file-earmark-text me-2" viewBox="0 0 16 16">
+                        <path d="M5.5 7a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1h-5zM5 9.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 0 1h-2a.5.5 0 0 1-.5-.5z"/>
+                        <path d="M9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4.5L9.5 0zm0 1v2H12v-.5a.5.5 0 0 0-.5-.5h-2z"/>
+                    </svg>
+                    Generate Summary
+                </button>
+                <a href="{% url 'ai_moderator_dashboard' %}" class="btn btn-outline-secondary">Back to Dashboard</a>
+            </form>
+            {% if not run.completed %}
+                <p class="text-warning small mt-2">Please wait for the deliberation to complete before generating a summary.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<style>
+    .chat-container {
+        background: #f8f9fa;
+    }
+    
+    .markdown-box {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+</style>
+{% endblock %}
+

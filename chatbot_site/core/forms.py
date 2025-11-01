@@ -2,7 +2,7 @@ import json
 
 from django import forms
 
-from .models import DiscussionSession
+from .models import DiscussionSession, AIDeliberationSession
 
 
 class ParticipantIdForm(forms.Form):
@@ -32,6 +32,7 @@ class DiscussionSessionForm(forms.ModelForm):
         fields = [
             "s_id",
             "topic",
+            "description",
             "question_followup_limit",
             "no_new_information_limit",
             "objective_questions",
@@ -42,6 +43,9 @@ class DiscussionSessionForm(forms.ModelForm):
         widgets = {
             "s_id": forms.TextInput(attrs={"class": "form-control", "placeholder": "Unique session identifier"}),
             "topic": forms.TextInput(attrs={"class": "form-control"}),
+            "description": forms.Textarea(
+                attrs={"rows": 6, "class": "form-control", "placeholder": "Detailed description (markdown supported)"}
+            ),
             "knowledge_base": forms.Textarea(
                 attrs={"rows": 8, "class": "form-control", "placeholder": "Moderator knowledge base for RAG"}
             ),
@@ -90,12 +94,97 @@ class DiscussionSessionForm(forms.ModelForm):
         return cleaned
 
 
+class AIDeliberationSessionForm(forms.ModelForm):
+    objective_questions = forms.CharField(
+        widget=forms.HiddenInput(),
+        required=False,
+    )
+    personas = forms.CharField(
+        widget=forms.HiddenInput(),
+        required=False,
+    )
+
+    class Meta:
+        model = AIDeliberationSession
+        fields = [
+            "s_id",
+            "topic",
+            "description",
+            "objective_questions",
+            "personas",
+        ]
+        widgets = {
+            "s_id": forms.TextInput(attrs={"class": "form-control", "placeholder": "Unique session identifier"}),
+            "topic": forms.TextInput(attrs={"class": "form-control"}),
+            "description": forms.Textarea(
+                attrs={"rows": 6, "class": "form-control", "placeholder": "Detailed session description"}
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        questions = []
+        personas = []
+        if self.instance and self.instance.pk:
+            questions = self.instance.get_question_sequence()
+            personas = self.instance.get_personas()
+        self.fields["objective_questions"].initial = json.dumps(questions)
+        self.fields["personas"].initial = json.dumps(personas)
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.objective_questions = self.cleaned_data.get("objective_questions", [])
+        instance.personas = self.cleaned_data.get("personas", [])
+        if commit:
+            instance.save()
+        return instance
+
+    def clean_objective_questions(self):
+        return self._clean_json_field("objective_questions", "Question list")
+
+    def clean_personas(self):
+        return self._clean_json_field("personas", "Personas list")
+
+    def _clean_json_field(self, field_name: str, field_label: str) -> list[str]:
+        raw = self.cleaned_data.get(field_name)
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise forms.ValidationError(f"Unable to decode {field_label}.") from exc
+        if not isinstance(parsed, list):
+            raise forms.ValidationError(f"{field_label} must be an array of strings.")
+
+        cleaned: list[str] = []
+        for entry in parsed:
+            text = str(entry).strip()
+            if text:
+                cleaned.append(text)
+        return cleaned
+
+
 class SessionSelectionForm(forms.Form):
     session_id = forms.ChoiceField(label="Active session", required=False)
 
     def __init__(self, *args, sessions=None, **kwargs):
         super().__init__(*args, **kwargs)
         session_choices = [("", "Create new session")]
+        if sessions is not None:
+            session_choices.extend(
+                (str(session.pk), f"{session.s_id} — {session.topic or 'No topic'}")
+                for session in sessions
+            )
+        self.fields["session_id"].choices = session_choices
+        self.fields["session_id"].widget.attrs.update({"class": "form-select"})
+
+
+class AISessionSelectionForm(forms.Form):
+    session_id = forms.ChoiceField(label="Active AI session", required=False)
+
+    def __init__(self, *args, sessions=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        session_choices = [("", "Create new AI session")]
         if sessions is not None:
             session_choices.extend(
                 (str(session.pk), f"{session.s_id} — {session.topic or 'No topic'}")

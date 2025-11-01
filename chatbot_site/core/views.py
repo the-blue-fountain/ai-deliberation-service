@@ -436,3 +436,212 @@ def user_conversation(request: HttpRequest, user_id: int) -> HttpResponse:
         "no_new_information_remaining": no_new_remaining,
     }
     return render(request, "core/user_conversation.html", context)
+
+
+# ============================================================================
+# AI-AI DELIBERATION VIEWS
+# ============================================================================
+
+
+def system_choice(request: HttpRequest) -> HttpResponse:
+    """Entry point: ask user to choose AI-Human or AI-AI deliberation."""
+    if request.method == "POST":
+        choice = request.POST.get("choice", "").strip()
+        if choice == "human":
+            return redirect("entry")
+        elif choice == "ai":
+            return redirect("ai_entry")
+    return render(request, "core/system_choice.html")
+
+
+def ai_entry_point(request: HttpRequest) -> HttpResponse:
+    """Entry point for AI-only deliberation (moderator access)."""
+    session = _get_or_create_default_ai_session()
+    return render(request, "core/ai_entry.html", {"active_session": session})
+
+
+def ai_moderator_dashboard(request: HttpRequest) -> HttpResponse:
+    """Moderator dashboard for AI-AI deliberation."""
+    from .forms import AIDeliberationSessionForm, AISessionSelectionForm
+    from .models import AIDeliberationSession
+
+    sessions = AIDeliberationSession.objects.all().order_by("-updated_at")
+    selected_session: Optional[AIDeliberationSession] = None
+
+    # Check for session_id in query parameters
+    query_session_id = request.GET.get("session_id")
+    if query_session_id:
+        try:
+            selected_session = sessions.filter(pk=int(query_session_id)).first()
+            if selected_session:
+                request.session["ai_moderator_selected_session_id"] = int(query_session_id)
+        except (TypeError, ValueError):
+            pass
+
+    # Fall back to session-stored selection or active session
+    if selected_session is None:
+        selected_session_id = request.session.get("ai_moderator_selected_session_id")
+        if selected_session_id:
+            selected_session = sessions.filter(pk=selected_session_id).first()
+
+    if selected_session is None:
+        selected_session = sessions.filter(is_active=True).order_by("-updated_at").first()
+
+    session_form: AIDeliberationSessionForm
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+
+        if action == "load_session":
+            target_id = request.POST.get("session_id")
+            if target_id:
+                try:
+                    request.session["ai_moderator_selected_session_id"] = int(target_id)
+                except (TypeError, ValueError):
+                    messages.error(request, "Unable to load the requested session.")
+                else:
+                    return redirect("ai_moderator_dashboard")
+            else:
+                request.session.pop("ai_moderator_selected_session_id", None)
+                return redirect("ai_moderator_dashboard")
+
+        if action in {"save_session", "create_session"}:
+            instance = selected_session if (action == "save_session" and selected_session) else None
+            session_form = AIDeliberationSessionForm(request.POST, instance=instance)
+            if session_form.is_valid():
+                new_session = session_form.save(commit=False)
+                if not new_session.pk:
+                    new_session.is_active = False
+                new_session.save()
+                request.session["ai_moderator_selected_session_id"] = new_session.pk
+                messages.success(request, "AI session saved.")
+                return redirect("ai_moderator_dashboard")
+            else:
+                # Form is invalid; show errors and re-render
+                messages.error(request, "Please fix the errors below.")
+        elif action == "activate_session":
+            if selected_session is None:
+                messages.error(request, "Select a session before activating it.")
+            else:
+                selected_session.activate()
+                request.session["ai_moderator_selected_session_id"] = selected_session.pk
+                messages.success(request, f"AI session {selected_session.s_id} is now active.")
+                return redirect("ai_moderator_dashboard")
+        elif action == "run_deliberation":
+            if selected_session is None:
+                messages.error(request, "Select a session before running deliberation.")
+            else:
+                # Run the deliberation
+                from .services.ai_deliberation_service import AIDeliberationService
+
+                try:
+                    service = AIDeliberationService(selected_session)
+                    run = service.run_deliberation()
+                    messages.success(request, "Deliberation completed.")
+                    return redirect("ai_deliberation_results", run_id=run.pk)
+                except Exception as exc:
+                    messages.error(request, f"Error running deliberation: {exc}")
+                    return redirect("ai_moderator_dashboard")
+    
+    # Initialize session_form if not already set
+    if "session_form" not in locals():
+        session_form = AIDeliberationSessionForm(instance=selected_session)
+
+    selection_initial = {
+        "session_id": str(selected_session.pk) if selected_session else "",
+    }
+    selection_form = AISessionSelectionForm(
+        request.POST if request.method == "POST" else None,
+        sessions=sessions,
+        initial=selection_initial,
+    )
+
+    context: Dict[str, Any] = {
+        "selection_form": selection_form,
+        "session_form": session_form,
+        "selected_session": selected_session,
+        "sessions": sessions,
+    }
+    return render(request, "core/ai_moderator_dashboard.html", context)
+
+
+def ai_deliberation_results(request: HttpRequest, run_id: int) -> HttpResponse:
+    """Display the results of an AI deliberation run."""
+    from .models import AIDebateRun
+
+    try:
+        run = AIDebateRun.objects.get(pk=run_id)
+    except AIDebateRun.DoesNotExist:
+        messages.error(request, "Debate run not found.")
+        return redirect("ai_moderator_dashboard")
+
+    session = run.session
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "summarize":
+            from .services.ai_deliberation_service import AIDeliberationService
+
+            try:
+                service = AIDeliberationService(session)
+                summary_text = service.generate_summary(run)
+
+                if summary_text:
+                    # Create or update summary record
+                    from .models import AIDebateSummary
+
+                    summary_obj, _ = AIDebateSummary.objects.get_or_create(session=session)
+                    summary_obj.topic = session.topic
+                    summary_obj.description = session.description
+                    summary_obj.objective_questions = session.objective_questions
+                    summary_obj.personas = session.personas
+                    summary_obj.summary_markdown = summary_text
+                    summary_obj.save()
+
+                    messages.success(request, "Summary generated and saved.")
+                    return redirect("ai_deliberation_results", run_id=run_id)
+            except Exception as exc:
+                messages.error(request, f"Error generating summary: {exc}")
+
+    # Format transcript for display (grouped by question)
+    transcript_by_question = {}
+    if run.transcript:
+        for turn in run.transcript:
+            q_idx = turn.get("question_index", 0)
+            q_text = turn.get("question", "")
+            if q_idx not in transcript_by_question:
+                transcript_by_question[q_idx] = {
+                    "question": q_text,
+                    "agents": [],
+                }
+            transcript_by_question[q_idx]["agents"].append({
+                "persona": turn.get("persona", ""),
+                "opinion": turn.get("opinion", ""),
+            })
+
+    # Get summary if it exists
+    from .models import AIDebateSummary
+
+    summary_obj = AIDebateSummary.objects.filter(session=session).first()
+
+    context = {
+        "session": session,
+        "run": run,
+        "transcript_by_question": transcript_by_question,
+        "summary": summary_obj,
+    }
+    return render(request, "core/ai_deliberation_results.html", context)
+
+
+def _get_or_create_default_ai_session() -> "AIDeliberationSession":
+    """Get or create a default AI deliberation session."""
+    from .models import AIDeliberationSession
+
+    session = AIDeliberationSession.objects.filter(is_active=True).order_by("-updated_at").first()
+    if not session:
+        session = AIDeliberationSession.objects.create(
+            s_id="ai-default",
+            topic="Default AI Deliberation",
+        )
+    return session
+

@@ -48,6 +48,13 @@
                 </div>
 
                 <div class="mb-3">
+                    {{ session_form.description.label_tag }}
+                    {{ session_form.description }}
+                    {% if session_form.description.help_text %}<div class="form-text">{{ session_form.description.help_text }}</div>{% endif %}
+                    {% for error in session_form.description.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+
+                <div class="mb-3">
                     {{ session_form.question_followup_limit.label_tag }}
                     {{ session_form.question_followup_limit }}
                     {% if session_form.question_followup_limit.help_text %}<div class="form-text">{{ session_form.question_followup_limit.help_text }}</div>{% endif %}
@@ -112,6 +119,7 @@
                     <button type="submit" class="btn btn-outline-secondary" name="action" value="run_rag" {% if not selected_session %}disabled{% endif %}>Run RAG</button>
                     <button type="submit" class="btn btn-outline-success" name="action" value="activate_session" {% if not selected_session or selected_session.is_active %}disabled{% endif %}>Activate Session</button>
                     <button type="submit" class="btn btn-outline-dark" name="action" value="analyze" {% if not selected_session %}disabled{% endif %}>Analyze</button>
+                    <a href="{% url 'system_choice' %}" class="btn btn-outline-info">Switch System</a>
                 </div>
                 {% if selected_session %}
                     <dl class="row small text-muted mt-3 mb-0">

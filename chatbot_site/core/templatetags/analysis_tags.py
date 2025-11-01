@@ -1,5 +1,6 @@
 import json
 from django import template
+import markdown
 
 register = template.Library()
 
@@ -21,3 +22,16 @@ def get_item(dictionary, key):
     if not isinstance(dictionary, dict):
         return None
     return dictionary.get(key, [])
+
+
+@register.filter
+def render_markdown(value):
+    """Render markdown string to HTML."""
+    if not value:
+        return ""
+    try:
+        return markdown.markdown(value, safe_mode=False)
+    except Exception:
+        # Fallback to plain text if rendering fails
+        return value
+

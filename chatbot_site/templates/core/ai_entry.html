@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-6">
+        <div class="card content-card p-4">
+            <h2 class="fs-4 mb-3">AI-AI Deliberation</h2>
+            <p class="text-muted mb-3">Welcome to the AI-AI Deliberation system. Here you can moderate debates between multiple AI agents.</p>
+            
+            <div class="d-grid gap-2">
+                <a href="{% url 'ai_moderator_dashboard' %}" class="btn btn-primary">Open Moderator Dashboard</a>
+                <a href="{% url 'system_choice' %}" class="btn btn-outline-secondary">Back to Choice</a>
+            </div>
+            
+            {% if active_session %}
+            <p class="text-muted small mb-0 mt-3">
+                Active session: <strong>{{ active_session.s_id }}</strong>{% if active_session.topic %} — Topic: {{ active_session.topic }}{% endif %}
+            </p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+

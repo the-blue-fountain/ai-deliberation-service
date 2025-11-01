@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import DiscussionSession, UserConversation
+from .models import DiscussionSession, UserConversation, AIDeliberationSession, AIDebateRun, AIDebateSummary
 
 
 @admin.register(DiscussionSession)
@@ -10,6 +10,7 @@ class DiscussionSessionAdmin(admin.ModelAdmin):
     fields = (
         "s_id",
         "topic",
+        "description",
         "knowledge_base",
         "user_system_prompt",
         "moderator_system_prompt",
@@ -32,3 +33,35 @@ class UserConversationAdmin(admin.ModelAdmin):
     search_fields = ("user_id", "session__s_id")
     list_filter = ("active",)
     readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(AIDeliberationSession)
+class AIDeliberationSessionAdmin(admin.ModelAdmin):
+    list_display = ("s_id", "topic", "is_active", "created_at")
+    list_filter = ("is_active", "created_at")
+    fields = (
+        "s_id",
+        "topic",
+        "description",
+        "objective_questions",
+        "personas",
+        "system_prompt_template",
+    )
+    search_fields = ("s_id", "topic")
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(AIDebateRun)
+class AIDebateRunAdmin(admin.ModelAdmin):
+    list_display = ("session", "completed", "created_at")
+    list_filter = ("completed", "created_at")
+    search_fields = ("session__s_id",)
+    readonly_fields = ("created_at", "updated_at", "transcript")
+
+
+@admin.register(AIDebateSummary)
+class AIDebateSummaryAdmin(admin.ModelAdmin):
+    list_display = ("session", "created_at")
+    search_fields = ("session__s_id", "topic")
+    readonly_fields = ("created_at", "updated_at")
+

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-6">
+        <div class="card content-card p-5">
+            <h2 class="fs-3 fw-bold mb-4 text-center">Choose Deliberation System</h2>
+            
+            <p class="text-center mb-4 text-muted">Select the type of discussion you would like to access:</p>
+            
+            <div class="d-grid gap-3">
+                <form method="post" novalidate class="w-100">
+                    {% csrf_token %}
+                    <button type="submit" name="choice" value="human" class="btn btn-lg btn-primary w-100">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" class="bi bi-people-fill me-2" viewBox="0 0 16 16">
+                            <path d="M7 14s1 0 1-1-1-4-5-4-5 3-5 4 1 1 1 1h8zm4-6a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1zM11 2a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
+                        </svg>
+                        AI-Human Deliberation
+                    </button>
+                </form>
+                
+                <form method="post" novalidate class="w-100">
+                    {% csrf_token %}
+                    <button type="submit" name="choice" value="ai" class="btn btn-lg btn-success w-100">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" class="bi bi-robot me-2" viewBox="0 0 16 16">
+                            <path d="M6 12.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1-.5-.5ZM3 8.062C3 6.76 4.235 5.765 5.53 5.889c.162.01.313.024.604.024.992 0 1.927-.363 2.868-.899.501-.3.946-.596 1.271-.879a1.007 1.007 0 0 0 .196-1.993 24.555 24.555 0 0 0-1.884-.596c-.5-.062-.945-.065-1.179-.065-.51 0-.578.035-.795.379l-.842 1.374.793-1.359A.5.5 0 0 0 2.5 3h-1V2a.5.5 0 0 0-1 0v1H.5a.5.5 0 0 0-.5.5v1h.538a.5.5 0 0 0 .096 1c-1.079.113-1.614.738-1.968 1.32-.344.578-.481 1.387-.481 1.979 0 .528.1.556 1.334 1.591.889.77 1.546 1.261 2.157 1.826.259.24.5.487.738.75.096.11.176.2.282.256.1.053.17.077.242.077.071 0 .141-.024.242-.077.106-.056.186-.146.282-.256.238-.263.479-.51.738-.75.611-.565 1.268-1.056 2.157-1.826 1.234-1.035 1.334-1.063 1.334-1.591 0-.592-.137-1.4-.481-1.979-.354-.582-.89-1.207-1.968-1.32a.5.5 0 0 0 .096-1h.538v-1a.5.5 0 0 0-1 0h-.5v-1a.5.5 0 0 0-.5-.5ZM8.5 13a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5V9a.5.5 0 0 0-.5-.5h-4a.5.5 0 0 0-.5.5v4Z"/>
+                        </svg>
+                        AI-AI Deliberation
+                    </button>
+                </form>
+            </div>
+            
+            <hr class="my-4">
+            
+            <p class="text-muted small mb-0">
+                <strong>AI-Human Deliberation:</strong> Participants discuss with AI facilitation<br>
+                <strong>AI-AI Deliberation:</strong> Multiple AI agents debate a topic
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+

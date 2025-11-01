@@ -8,7 +8,8 @@
             <form method="post" novalidate>
                 {% csrf_token %}
                 {{ form.as_p }}
-                <div class="d-flex justify-content-end">
+                <div class="d-flex justify-content-end gap-2">
+                    <a href="{% url 'system_choice' %}" class="btn btn-outline-secondary">Back</a>
                     <button type="submit" class="btn btn-primary">Continue</button>
                 </div>
             </form>
@@ -19,3 +20,4 @@
     </div>
 </div>
 {% endblock %}
+

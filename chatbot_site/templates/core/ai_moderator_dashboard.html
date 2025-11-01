@@ -1,0 +1,343 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row gy-4">
+    <div class="col-12 col-lg-8">
+        <div class="card content-card p-4 mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h2 class="fs-5 mb-0">Select Session</h2>
+                <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#newAISessionModal">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-plus-lg" viewBox="0 0 16 16">
+                        <path fill-rule="evenodd" d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2Z"/>
+                    </svg>
+                    New Session
+                </button>
+            </div>
+            <form method="post" novalidate class="row g-2">
+                {% csrf_token %}
+                <div class="col-12">
+                    {{ selection_form.session_id.label_tag }}
+                    {{ selection_form.session_id }}
+                </div>
+                <div class="col-12 d-flex justify-content-end">
+                    <button type="submit" class="btn btn-secondary" name="action" value="load_session">Load Session</button>
+                </div>
+                <p class="text-muted small mb-0">Select an existing session to load it for editing.</p>
+            </form>
+        </div>
+
+        <div class="card content-card p-4">
+            <h2 class="fs-4 mb-3">Moderator Controls</h2>
+            <form method="post" novalidate>
+                {% csrf_token %}
+                {{ session_form.non_field_errors }}
+
+                <div class="mb-3">
+                    {{ session_form.s_id.label_tag }}
+                    {{ session_form.s_id }}
+                    {% if session_form.s_id.help_text %}<div class="form-text">{{ session_form.s_id.help_text }}</div>{% endif %}
+                    {% for error in session_form.s_id.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+
+                <div class="mb-3">
+                    {{ session_form.topic.label_tag }}
+                    {{ session_form.topic }}
+                    {% for error in session_form.topic.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+
+                <div class="mb-3">
+                    {{ session_form.description.label_tag }}
+                    {{ session_form.description }}
+                    {% for error in session_form.description.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+
+                {{ session_form.objective_questions }}
+                <div class="mb-3" id="questionBuilder" data-session-id="{{ selected_session.pk|default:'' }}">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <label class="form-label mb-0">Objective Questions</label>
+                    </div>
+                    <p class="form-text">Questions are asked in the order shown below.</p>
+                    <div id="questionList" class="list-group mb-3"></div>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="manualQuestionInput" placeholder="Type a new question and click Add">
+                        <button type="button" class="btn btn-outline-primary" id="addManualQuestionBtn">Add</button>
+                    </div>
+                    {% for error in session_form.objective_questions.errors %}
+                        <div class="text-danger small mt-2">{{ error }}</div>
+                    {% endfor %}
+                </div>
+
+                {{ session_form.personas }}
+                <div class="mb-3" id="personaBuilder">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <label class="form-label mb-0">AI Agent Personas</label>
+                    </div>
+                    <p class="form-text">Define the personas (descriptions) for each AI agent.</p>
+                    <div id="personaList" class="list-group mb-3"></div>
+                    <div class="input-group">
+                        <textarea class="form-control" id="manualPersonaInput" placeholder="Describe a persona for an AI agent (e.g., 'A pragmatic economist focused on efficiency')" rows="3"></textarea>
+                    </div>
+                    <button type="button" class="btn btn-outline-primary w-100 mt-2" id="addManualPersonaBtn">Add Persona</button>
+                    {% for error in session_form.personas.errors %}
+                        <div class="text-danger small mt-2">{{ error }}</div>
+                    {% endfor %}
+                </div>
+
+                <div class="d-flex flex-wrap gap-2 mt-4">
+                    <button type="submit" class="btn btn-primary" name="action" value="save_session" {% if not selected_session %}disabled{% endif %}>Save Changes</button>
+                    <button type="submit" class="btn btn-outline-primary" name="action" value="create_session">Save As New</button>
+                    <button type="submit" class="btn btn-success" name="action" value="activate_session" {% if not selected_session or selected_session.is_active %}disabled{% endif %}>Activate Session</button>
+                </div>
+
+                {% if selected_session %}
+                <div class="mt-3">
+                    <hr>
+                    <div class="d-flex gap-2">
+                        <button type="submit" formtarget="_blank" class="btn btn-outline-info" name="action" value="run_deliberation">Run Deliberation</button>
+                        <a href="{% url 'system_choice' %}" class="btn btn-outline-secondary">Back to Choice</a>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if selected_session %}
+                    <dl class="row small text-muted mt-3 mb-0">
+                        <dt class="col-sm-5">Session ID</dt>
+                        <dd class="col-sm-7">{{ selected_session.s_id }}</dd>
+                        <dt class="col-sm-5">Active</dt>
+                        <dd class="col-sm-7">{{ selected_session.is_active|yesno:"Yes,No" }}</dd>
+                        <dt class="col-sm-5">Questions</dt>
+                        <dd class="col-sm-7">{{ selected_session.objective_questions|length }}</dd>
+                        <dt class="col-sm-5">Personas</dt>
+                        <dd class="col-sm-7">{{ selected_session.personas|length }}</dd>
+                    </dl>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+
+    <div class="col-12 col-lg-4">
+        <div class="card content-card p-4">
+            <h3 class="fs-5 mb-3">Sessions</h3>
+            {% if sessions %}
+                <ul class="list-group list-group-flush">
+                    {% for session in sessions %}
+                        <li class="list-group-item d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>{{ session.s_id }}</strong>
+                                <br>
+                                <span class="text-muted small">{{ session.topic }}</span>
+                            </div>
+                            <span class="badge {% if session.is_active %}bg-primary{% else %}bg-secondary{% endif %}">
+                                {% if session.is_active %}Active{% else %}Inactive{% endif %}
+                            </span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="text-muted mb-0">No sessions yet.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Create New AI Session Modal -->
+<div class="modal fade" id="newAISessionModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5">Create New AI Session</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="newAISessionForm" method="post" novalidate>
+                {% csrf_token %}
+                <input type="hidden" name="action" value="create_session">
+                <!-- Hidden fields required by the form for initial values -->
+                <input type="hidden" name="objective_questions" id="modal_objective_questions" value="[]">
+                <input type="hidden" name="personas" id="modal_personas" value="[]">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="id_ai_session_id_modal" class="form-label">Session ID <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="id_ai_session_id_modal" name="s_id" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="id_ai_topic_modal" class="form-label">Topic <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="id_ai_topic_modal" name="topic" required>
+                    </div>
+                    <div id="aiSessionFormErrors" class="alert alert-danger d-none"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Check if there are session form errors and reopen modal if needed
+    const sessionFormErrors = document.querySelectorAll('[id^="id_objective_questions"], [id^="id_personas"], [id^="id_s_id"], [id^="id_topic"]');
+    const hasErrors = Array.from(document.querySelectorAll('.text-danger')).some(el => {
+        return el.textContent.includes('error') || el.textContent.includes('Unable to') || el.textContent.includes('must be');
+    });
+    
+    const modalElement = document.getElementById('newAISessionModal');
+    const actionField = document.querySelector('input[name="action"]');
+    
+    if (hasErrors && actionField && actionField.value === 'create_session' && modalElement) {
+        // Reopen the modal to show errors
+        const modal = new bootstrap.Modal(modalElement);
+        setTimeout(() => modal.show(), 100);
+    }
+    
+    // Question Builder
+    const questionHiddenField = document.getElementById('id_objective_questions');
+    const questionListEl = document.getElementById('questionList');
+    const addQuestionBtn = document.getElementById('addManualQuestionBtn');
+    const questionInputEl = document.getElementById('manualQuestionInput');
+    
+    let questions = [];
+    
+    const syncQuestionField = () => {
+        if (questionHiddenField) {
+            questionHiddenField.value = JSON.stringify(questions);
+        }
+    };
+    
+    const renderQuestions = () => {
+        syncQuestionField();
+        questionListEl.innerHTML = '';
+        if (!questions.length) {
+            const empty = document.createElement('div');
+            empty.className = 'list-group-item text-muted';
+            empty.textContent = 'No questions yet.';
+            questionListEl.appendChild(empty);
+            return;
+        }
+        questions.forEach((text, idx) => {
+            const item = document.createElement('div');
+            item.className = 'list-group-item d-flex justify-content-between align-items-center';
+            item.innerHTML = `<span>${idx + 1}. ${text}</span>`;
+            
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn btn-sm btn-outline-danger';
+            btn.textContent = 'Remove';
+            btn.onclick = () => {
+                questions.splice(idx, 1);
+                renderQuestions();
+            };
+            
+            item.appendChild(btn);
+            questionListEl.appendChild(item);
+        });
+    };
+    
+    if (addQuestionBtn && questionInputEl) {
+        addQuestionBtn.onclick = () => {
+            const text = questionInputEl.value.trim();
+            if (text) {
+                questions.push(text);
+                questionInputEl.value = '';
+                renderQuestions();
+            }
+        };
+        questionInputEl.onkeypress = (e) => {
+            if (e.key === 'Enter') {
+                addQuestionBtn.click();
+                e.preventDefault();
+            }
+        };
+    }
+    
+    // Hydrate questions
+    if (questionHiddenField && questionHiddenField.value) {
+        try {
+            questions = JSON.parse(questionHiddenField.value);
+        } catch (e) {
+            questions = [];
+        }
+        renderQuestions();
+    }
+    
+    // Persona Builder
+    const personaHiddenField = document.getElementById('id_personas');
+    const personaListEl = document.getElementById('personaList');
+    const addPersonaBtn = document.getElementById('addManualPersonaBtn');
+    const personaInputEl = document.getElementById('manualPersonaInput');
+    
+    let personas = [];
+    
+    const syncPersonaField = () => {
+        if (personaHiddenField) {
+            personaHiddenField.value = JSON.stringify(personas);
+        }
+    };
+    
+    const renderPersonas = () => {
+        syncPersonaField();
+        personaListEl.innerHTML = '';
+        if (!personas.length) {
+            const empty = document.createElement('div');
+            empty.className = 'list-group-item text-muted';
+            empty.textContent = 'No personas yet.';
+            personaListEl.appendChild(empty);
+            return;
+        }
+        personas.forEach((text, idx) => {
+            const item = document.createElement('div');
+            item.className = 'list-group-item';
+            
+            const header = document.createElement('div');
+            header.className = 'd-flex justify-content-between align-items-start';
+            
+            const title = document.createElement('div');
+            title.innerHTML = `<strong>Agent ${idx + 1}</strong><br><small>${text}</small>`;
+            
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn btn-sm btn-outline-danger';
+            btn.textContent = 'Remove';
+            btn.onclick = () => {
+                personas.splice(idx, 1);
+                renderPersonas();
+            };
+            
+            header.appendChild(title);
+            header.appendChild(btn);
+            item.appendChild(header);
+            personaListEl.appendChild(item);
+        });
+    };
+    
+    if (addPersonaBtn && personaInputEl) {
+        addPersonaBtn.onclick = () => {
+            const text = personaInputEl.value.trim();
+            if (text) {
+                personas.push(text);
+                personaInputEl.value = '';
+                renderPersonas();
+            }
+        };
+        personaInputEl.onkeypress = (e) => {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                addPersonaBtn.click();
+                e.preventDefault();
+            }
+        };
+    }
+    
+    // Hydrate personas
+    if (personaHiddenField && personaHiddenField.value) {
+        try {
+            personas = JSON.parse(personaHiddenField.value);
+        } catch (e) {
+            personas = [];
+        }
+        renderPersonas();
+    }
+});
+</script>
+{% endblock %}
+
