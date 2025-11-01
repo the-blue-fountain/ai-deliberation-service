@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Dict, List, Optional
 
 from chromadb import Client
@@ -21,6 +22,9 @@ class RetrievedChunk:
 
 
 _CHROMA_CLIENT = Client(ChromaSettings(anonymized_telemetry=False))
+
+
+logger = logging.getLogger(__name__)
 
 
 class RagService:
@@ -58,6 +62,7 @@ class RagService:
             self.session.save(update_fields=["rag_chunk_count", "rag_last_built_at"])
             return 0
 
+        # Prepare ids and metadata so we can print key/value pairs for each chunk
         chunk_ids = [f"knowledge-{index}" for index in range(len(chunks))]
         chunk_metadata = [
             {
@@ -66,6 +71,28 @@ class RagService:
             }
             for index in range(len(chunks))
         ]
+
+        # Print key/value pairs for each chunk
+        print(f"\n{'='*80}")
+        print(f"RAG CHUNKING: Produced {len(chunks)} chunks for session '{self.session.s_id}'")
+        print(f"{'='*80}\n")
+        for index, chunk in enumerate(chunks):
+            cid = chunk_ids[index]
+            meta = chunk_metadata[index]
+            print("-" * 80)
+            print(f"Chunk: {index}")
+            print(f"Key: id")
+            print(f"Value: {cid}")
+            print()
+            for k, v in meta.items():
+                print(f"Key: {k}")
+                print(f"Value: {v}")
+                print()
+            print(f"Key: text")
+            print(f"Value: {chunk}")
+            print("-" * 80)
+            print()
+            logger.info("RAG chunk %d (id=%s session=%s)", index, cid, self.session.s_id)
         self._collection.add(ids=chunk_ids, documents=chunks, metadatas=chunk_metadata)
         self.session.rag_chunk_count = len(chunks)
         self.session.rag_last_built_at = timezone.now()
