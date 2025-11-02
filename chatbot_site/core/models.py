@@ -40,6 +40,10 @@ class DiscussionSession(models.Model):
         blank=True,
         default=DEFAULT_MODERATOR_SYSTEM_PROMPT,
     )
+    user_instructions = models.TextField(
+        blank=True,
+        help_text="Optional moderator-provided instructions for participants",
+    )
     knowledge_base = models.TextField(blank=True)
     rag_chunk_count = models.PositiveIntegerField(default=0)
     rag_last_built_at = models.DateTimeField(null=True, blank=True)
@@ -172,6 +176,10 @@ class AIDeliberationSession(models.Model):
     system_prompt_template = models.TextField(
         blank=True,
         help_text="System prompt template (placeholders: {persona}, {question}, {opinions})",
+    )
+    user_instructions = models.TextField(
+        blank=True,
+        help_text="Optional moderator-provided instructions for AI agents",
     )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

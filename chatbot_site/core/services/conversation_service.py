@@ -194,6 +194,15 @@ class UserConversationService:
             ]
         )
 
+        # Add moderator-provided user instructions if present
+        if self.session.user_instructions and self.session.user_instructions.strip():
+            user_instructions_prompt = (
+                f"MODERATOR INSTRUCTIONS FOR THIS DISCUSSION:\n"
+                f"{self.session.user_instructions}\n\n"
+                f"Ensure these instructions guide your interaction with the participant."
+            )
+            messages.append({"role": "system", "content": user_instructions_prompt})
+
         if rag_context:
             messages.append(
                 {

@@ -41,9 +41,12 @@ class AIDeliberationService:
         self.client = get_openai_client()
 
     def run_deliberation(self) -> AIDebateRun:
-        """Run the full deliberation for all questions and all agents.
+        """Run a two-round deliberation for all questions and all agents.
 
-        Returns the populated AIDebateRun transcript.
+        Round 1: Each agent states opinion sequentially (A→B→C)
+        Round 2: Each agent responds to previous agents in rotating order (B→C→A, then C→A→B, then A→B→C)
+
+        Returns the populated AIDebateRun transcript with both rounds.
         """
         # Create the run record
         run = AIDebateRun.objects.create(session=self.session)
@@ -57,28 +60,77 @@ class AIDeliberationService:
             return run
 
         transcript: List[Dict] = []
+        num_agents = len(personas)
 
         # For each question
         for question_idx, question in enumerate(questions):
+            # ===== ROUND 1: Sequential opinions =====
+            # Store round 1 opinions indexed by agent_idx
+            round1_opinions: Dict[int, AgentOpinion] = {}
             opinions_so_far: List[AgentOpinion] = []
 
-            # For each agent
             for agent_idx, persona in enumerate(personas):
-                # Get this agent's opinion
+                # Get this agent's opinion (hearing all previous agents' summaries)
                 opinion = self._get_agent_opinion(
                     persona=persona,
                     question=question,
                     prior_opinions=opinions_so_far,
+                    user_instructions=self.session.user_instructions,
+                    round_number=1,
                 )
 
                 opinions_so_far.append(opinion)
+                round1_opinions[agent_idx] = opinion
 
                 # Record in transcript
                 transcript.append({
                     "question_index": question_idx,
                     "question": question,
+                    "round": 1,
                     "agent_index": agent_idx,
                     "persona": persona,
+                    "opinion": opinion.opinion,
+                    "terse_summary": opinion.summary,
+                })
+
+            # ===== ROUND 2: Rotating context =====
+            # Each agent sees the opinions of the other two in a rotated order
+            # If A, B, C: A sees [B, C], B sees [C, A], C sees [A, B]
+            round2_opinions: Dict[int, AgentOpinion] = {}
+
+            for starting_agent_idx in range(num_agents):
+                # Build the rotating sequence: start from the agent after this one
+                rotating_sequence = [
+                    (starting_agent_idx + i) % num_agents
+                    for i in range(1, num_agents)
+                ]
+                
+                # Get opinions in rotation order (excluding this agent)
+                opinions_to_share: List[AgentOpinion] = [
+                    round1_opinions[agent_idx]
+                    for agent_idx in rotating_sequence
+                ]
+
+                agent_persona = personas[starting_agent_idx]
+                
+                # Get this agent's second opinion
+                opinion = self._get_agent_opinion(
+                    persona=agent_persona,
+                    question=question,
+                    prior_opinions=opinions_to_share,
+                    user_instructions=self.session.user_instructions,
+                    round_number=2,
+                )
+
+                round2_opinions[starting_agent_idx] = opinion
+
+                # Record in transcript
+                transcript.append({
+                    "question_index": question_idx,
+                    "question": question,
+                    "round": 2,
+                    "agent_index": starting_agent_idx,
+                    "persona": agent_persona,
                     "opinion": opinion.opinion,
                     "terse_summary": opinion.summary,
                 })
@@ -93,8 +145,18 @@ class AIDeliberationService:
         persona: str,
         question: str,
         prior_opinions: List[AgentOpinion],
+        user_instructions: str = "",
+        round_number: int = 1,
     ) -> AgentOpinion:
-        """Get one agent's opinion on the question given prior opinions."""
+        """Get one agent's opinion on the question given prior opinions.
+        
+        Args:
+            persona: Description of the agent's perspective
+            question: The objective question to answer
+            prior_opinions: List of AgentOpinion from previous agents
+            user_instructions: Optional moderator-provided instructions
+            round_number: Which round of deliberation (1 or 2)
+        """
 
         # Build the prior opinions context
         opinions_text = ""
@@ -111,14 +173,19 @@ class AIDeliberationService:
             f"You are participating in a structured debate with other AI agents."
         )
 
+        # Add user instructions if provided
+        if user_instructions and user_instructions.strip():
+            system_prompt += f"\n\nMODERATOR INSTRUCTIONS:\n{user_instructions}"
+
         # Build the user prompt
+        round_context = f" (Round {round_number} of deliberation)" if round_number > 1 else ""
         user_prompt = (
-            f"Objective question: {question}\n\n"
+            f"Objective question{round_context}: {question}\n\n"
         )
 
         if opinions_text:
             user_prompt += (
-                f"Opinions shared so far:\n"
+                f"Opinions shared by other agents:\n"
                 f"{opinions_text}\n\n"
             )
 
@@ -229,15 +296,22 @@ class AIDeliberationService:
 
         lines = []
         current_question = None
+        current_round = None
 
         for turn in transcript:
             question = turn.get("question", "")
+            round_num = turn.get("round", 1)
             persona = turn.get("persona", "")
             opinion = turn.get("opinion", "")
 
             if question != current_question:
                 current_question = question
+                current_round = None
                 lines.append(f"\n## Question: {question}\n")
+
+            if round_num != current_round:
+                current_round = round_num
+                lines.append(f"\n### Round {round_num}\n")
 
             lines.append(f"**Agent ({persona}):**")
             lines.append(opinion)

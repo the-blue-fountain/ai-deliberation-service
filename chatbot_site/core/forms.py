@@ -39,6 +39,7 @@ class DiscussionSessionForm(forms.ModelForm):
             "knowledge_base",
             "user_system_prompt",
             "moderator_system_prompt",
+            "user_instructions",
         ]
         widgets = {
             "s_id": forms.TextInput(attrs={"class": "form-control", "placeholder": "Unique session identifier"}),
@@ -51,6 +52,9 @@ class DiscussionSessionForm(forms.ModelForm):
             ),
             "user_system_prompt": forms.Textarea(attrs={"rows": 6, "class": "form-control"}),
             "moderator_system_prompt": forms.Textarea(attrs={"rows": 6, "class": "form-control"}),
+            "user_instructions": forms.Textarea(
+                attrs={"rows": 4, "class": "form-control", "placeholder": "Optional instructions for participants"}
+            ),
         }
 
     def __init__(self, *args, **kwargs):
@@ -112,12 +116,16 @@ class AIDeliberationSessionForm(forms.ModelForm):
             "description",
             "objective_questions",
             "personas",
+            "user_instructions",
         ]
         widgets = {
             "s_id": forms.TextInput(attrs={"class": "form-control", "placeholder": "Unique session identifier"}),
             "topic": forms.TextInput(attrs={"class": "form-control"}),
             "description": forms.Textarea(
                 attrs={"rows": 6, "class": "form-control", "placeholder": "Detailed session description"}
+            ),
+            "user_instructions": forms.Textarea(
+                attrs={"rows": 4, "class": "form-control", "placeholder": "Optional instructions for AI agents"}
             ),
         }
 
