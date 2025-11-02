@@ -29,7 +29,7 @@
 
         <div class="card content-card p-4">
             <h2 class="fs-4 mb-3">Moderator Controls</h2>
-            <form method="post" novalidate>
+            <form method="post" novalidate enctype="multipart/form-data">
                 {% csrf_token %}
                 {{ session_form.non_field_errors }}
 
@@ -97,6 +97,12 @@
                     {{ session_form.knowledge_base }}
                     {% if session_form.knowledge_base.help_text %}<div class="form-text">{{ session_form.knowledge_base.help_text }}</div>{% endif %}
                     {% for error in session_form.knowledge_base.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Or upload a knowledge file (.txt or .csv)</label>
+                    <input type="file" name="knowledge_file" id="id_knowledge_file" accept=".txt,.csv" class="form-control" style="max-width:360px;" />
+                    <div class="form-text">Uploaded file will be used to build the RAG index when you click Run RAG.</div>
                 </div>
 
                 <div class="mb-3">

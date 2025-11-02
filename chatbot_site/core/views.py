@@ -22,6 +22,8 @@ from .services.conversation_service import (
 from .services.rag_service import RagService
 from .services.openai_client import get_openai_client
 from django.conf import settings
+import csv
+import io
 
 
 @require_http_methods(["POST"])
@@ -248,8 +250,33 @@ def moderator_dashboard(request: HttpRequest) -> HttpResponse:
             if selected_session is None:
                 messages.error(request, "Save or select a session before rebuilding the index.")
             else:
+                # Support optional file upload (.txt or .csv) or inline knowledge_base text
+                raw_text = None
+                uploaded = request.FILES.get('knowledge_file')
+                if uploaded is not None:
+                    try:
+                        content = uploaded.read()
+                        try:
+                            text = content.decode('utf-8')
+                        except Exception:
+                            text = content.decode('latin-1')
+                        name = (uploaded.name or '').lower()
+                        if name.endswith('.csv'):
+                            # Parse CSV into human-readable lines
+                            reader = csv.reader(io.StringIO(text))
+                            rows = [', '.join([cell for cell in row]) for row in reader]
+                            raw_text = '\n'.join(rows)
+                        else:
+                            raw_text = text
+                    except Exception as exc:  # pragma: no cover - defensive
+                        messages.error(request, f"Failed to read uploaded file: {exc}")
+                        return redirect("moderator_dashboard")
+                else:
+                    # Use posted knowledge_base if provided, otherwise fall back to session field
+                    raw_text = request.POST.get('knowledge_base') or None
+
                 try:
-                    chunk_count = RagService(selected_session).build_index()
+                    chunk_count = RagService(selected_session).build_index(raw_text=raw_text)
                 except Exception as exc:  # pragma: no cover - defensive
                     messages.error(request, f"Failed to rebuild the RAG index: {exc}")
                 else:
@@ -542,6 +569,43 @@ def ai_moderator_dashboard(request: HttpRequest) -> HttpResponse:
                 except Exception as exc:
                     messages.error(request, f"Error running deliberation: {exc}")
                     return redirect("ai_moderator_dashboard")
+        elif action == "run_rag":
+            if selected_session is None:
+                messages.error(request, "Save or select a session before rebuilding the index.")
+            else:
+                # Support optional file upload (.txt or .csv) or inline knowledge_base text
+                raw_text = None
+                uploaded = request.FILES.get('knowledge_file')
+                if uploaded is not None:
+                    try:
+                        content = uploaded.read()
+                        try:
+                            text = content.decode('utf-8')
+                        except Exception:
+                            text = content.decode('latin-1')
+                        name = (uploaded.name or '').lower()
+                        if name.endswith('.csv'):
+                            reader = csv.reader(io.StringIO(text))
+                            rows = [', '.join([cell for cell in row]) for row in reader]
+                            raw_text = '\n'.join(rows)
+                        else:
+                            raw_text = text
+                    except Exception as exc:
+                        messages.error(request, f"Failed to read uploaded file: {exc}")
+                        return redirect("ai_moderator_dashboard")
+                else:
+                    raw_text = request.POST.get('knowledge_base') or None
+
+                try:
+                    chunk_count = RagService(selected_session).build_index(raw_text=raw_text)
+                except Exception as exc:
+                    messages.error(request, f"Failed to rebuild the RAG index: {exc}")
+                else:
+                    if chunk_count == 0:
+                        messages.warning(request, "RAG index is empty. Add knowledge base content before rebuilding.")
+                    else:
+                        messages.success(request, f"RAG index rebuilt with {chunk_count} knowledge snippets.")
+                return redirect("ai_moderator_dashboard")
     
     # Initialize session_form if not already set
     if "session_form" not in locals():

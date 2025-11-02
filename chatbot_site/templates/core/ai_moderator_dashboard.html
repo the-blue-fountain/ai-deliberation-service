@@ -13,7 +13,7 @@
                     New Session
                 </button>
             </div>
-            <form method="post" novalidate class="row g-2">
+            <form method="post" novalidate class="row g-2" enctype="multipart/form-data">
                 {% csrf_token %}
                 <div class="col-12">
                     {{ selection_form.session_id.label_tag }}
@@ -28,7 +28,7 @@
 
         <div class="card content-card p-4">
             <h2 class="fs-4 mb-3">Moderator Controls</h2>
-            <form method="post" novalidate>
+            <form method="post" novalidate enctype="multipart/form-data">
                 {% csrf_token %}
                 {{ session_form.non_field_errors }}
 
@@ -55,16 +55,24 @@
                 <div class="mb-3" id="questionBuilder" data-session-id="{{ selected_session.pk|default:'' }}">
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <label class="form-label mb-0">Objective Questions</label>
+                        <button type="button" class="btn btn-sm btn-outline-info" id="generateQuestionsBtn">Generate Suggestions</button>
                     </div>
-                    <p class="form-text">Questions are asked in the order shown below.</p>
+                    <p class="form-text">Questions are asked in the order shown below. Reorder or remove them to shape the discussion flow.</p>
                     <div id="questionList" class="list-group mb-3"></div>
                     <div class="input-group">
                         <input type="text" class="form-control" id="manualQuestionInput" placeholder="Type a new question and click Add">
                         <button type="button" class="btn btn-outline-primary" id="addManualQuestionBtn">Add</button>
                     </div>
+                    <div class="form-text mt-2">Use the controls beside each question to reorder.</div>
                     {% for error in session_form.objective_questions.errors %}
                         <div class="text-danger small mt-2">{{ error }}</div>
                     {% endfor %}
+                </div>
+
+                <div id="generatedQuestions" class="mb-3 d-none">
+                    <label class="form-label">AI Suggestions</label>
+                    <div id="suggestionsList" class="list-group"></div>
+                    <div class="form-text mt-2">Click "Add" on any suggestion to include it in your question list.</div>
                 </div>
 
                 {{ session_form.personas }}
@@ -83,10 +91,18 @@
                     {% endfor %}
                 </div>
 
+                <div class="mb-3">
+                    <label class="form-label">Knowledge base (optional)</label>
+                    <textarea id="id_knowledge_base_ai" name="knowledge_base" class="form-control" rows="5" placeholder="Paste text to include in RAG or upload a .txt/.csv file"></textarea>
+                    <div class="form-text">You can paste text here or upload a .txt/.csv file to build the RAG index.</div>
+                    <input type="file" id="id_ai_knowledge_file" name="knowledge_file" accept=".txt,.csv" class="form-control mt-2" style="max-width:320px;" />
+                </div>
+
                 <div class="d-flex flex-wrap gap-2 mt-4">
                     <button type="submit" class="btn btn-primary" name="action" value="save_session" {% if not selected_session %}disabled{% endif %}>Save Changes</button>
                     <button type="submit" class="btn btn-outline-primary" name="action" value="create_session">Save As New</button>
                     <button type="submit" class="btn btn-success" name="action" value="activate_session" {% if not selected_session or selected_session.is_active %}disabled{% endif %}>Activate Session</button>
+                    <button type="submit" class="btn btn-outline-secondary" name="action" value="run_rag" {% if not selected_session %}disabled{% endif %}>Run RAG</button>
                 </div>
 
                 {% if selected_session %}
@@ -94,6 +110,7 @@
                     <hr>
                     <div class="d-flex gap-2">
                         <button type="submit" formtarget="_blank" class="btn btn-outline-info" name="action" value="run_deliberation">Run Deliberation</button>
+                        <a href="#" class="btn btn-outline-secondary" onclick="document.getElementById('id_ai_knowledge_file').click(); return false;">Upload Knowledge File</a>
                         <a href="{% url 'system_choice' %}" class="btn btn-outline-secondary">Back to Choice</a>
                     </div>
                 </div>
@@ -196,16 +213,23 @@ document.addEventListener('DOMContentLoaded', function() {
     const questionListEl = document.getElementById('questionList');
     const addQuestionBtn = document.getElementById('addManualQuestionBtn');
     const questionInputEl = document.getElementById('manualQuestionInput');
-    
+    const generateBtn = document.getElementById('generateQuestionsBtn');
+    const suggestionsContainer = document.getElementById('generatedQuestions');
+    const suggestionsList = document.getElementById('suggestionsList');
+    const builderEl = document.getElementById('questionBuilder');
+    const knowledgeField = document.getElementById('id_knowledge_base_ai');
+    const topicField = document.getElementById('id_topic');
+
     let questions = [];
-    
+
     const syncQuestionField = () => {
         if (questionHiddenField) {
             questionHiddenField.value = JSON.stringify(questions);
         }
     };
-    
+
     const renderQuestions = () => {
+        if (!questionListEl) return;
         syncQuestionField();
         questionListEl.innerHTML = '';
         if (!questions.length) {
@@ -215,33 +239,72 @@ document.addEventListener('DOMContentLoaded', function() {
             questionListEl.appendChild(empty);
             return;
         }
+
         questions.forEach((text, idx) => {
             const item = document.createElement('div');
-            item.className = 'list-group-item d-flex justify-content-between align-items-center';
-            item.innerHTML = `<span>${idx + 1}. ${text}</span>`;
-            
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'btn btn-sm btn-outline-danger';
-            btn.textContent = 'Remove';
-            btn.onclick = () => {
+            item.className = 'list-group-item d-flex align-items-start justify-content-between gap-2';
+
+            const label = document.createElement('div');
+            label.className = 'flex-grow-1';
+            label.textContent = `${idx + 1}. ${text}`;
+            item.appendChild(label);
+
+            const controls = document.createElement('div');
+            controls.className = 'btn-group btn-group-sm';
+
+            const upBtn = document.createElement('button');
+            upBtn.type = 'button';
+            upBtn.className = 'btn btn-outline-secondary';
+            upBtn.innerText = 'Up';
+            upBtn.disabled = idx === 0;
+            upBtn.addEventListener('click', () => {
+                if (idx === 0) return;
+                const target = questions.splice(idx, 1)[0];
+                questions.splice(idx - 1, 0, target);
+                renderQuestions();
+            });
+
+            const downBtn = document.createElement('button');
+            downBtn.type = 'button';
+            downBtn.className = 'btn btn-outline-secondary';
+            downBtn.innerText = 'Down';
+            downBtn.disabled = idx === questions.length - 1;
+            downBtn.addEventListener('click', () => {
+                if (idx === questions.length - 1) return;
+                const target = questions.splice(idx, 1)[0];
+                questions.splice(idx + 1, 0, target);
+                renderQuestions();
+            });
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'btn btn-outline-danger';
+            removeBtn.innerText = 'Remove';
+            removeBtn.addEventListener('click', () => {
                 questions.splice(idx, 1);
                 renderQuestions();
-            };
-            
-            item.appendChild(btn);
+            });
+
+            controls.appendChild(upBtn);
+            controls.appendChild(downBtn);
+            controls.appendChild(removeBtn);
+            item.appendChild(controls);
+
             questionListEl.appendChild(item);
         });
     };
-    
+
+    const addQuestion = (text) => {
+        const trimmed = (text || '').trim();
+        if (!trimmed) return;
+        questions.push(trimmed);
+        renderQuestions();
+    };
+
     if (addQuestionBtn && questionInputEl) {
         addQuestionBtn.onclick = () => {
-            const text = questionInputEl.value.trim();
-            if (text) {
-                questions.push(text);
-                questionInputEl.value = '';
-                renderQuestions();
-            }
+            addQuestion(questionInputEl.value);
+            questionInputEl.value = '';
         };
         questionInputEl.onkeypress = (e) => {
             if (e.key === 'Enter') {
@@ -250,7 +313,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         };
     }
-    
+
     // Hydrate questions
     if (questionHiddenField && questionHiddenField.value) {
         try {
@@ -260,7 +323,78 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         renderQuestions();
     }
-    
+
+    // Generate suggestions handler (calls the shared generate_questions_api)
+    if (generateBtn) {
+        generateBtn.addEventListener('click', async (event) => {
+            event.preventDefault();
+            const topic = topicField ? topicField.value.trim() : '';
+            if (!topic) {
+                alert('Please enter a topic before generating questions.');
+                return;
+            }
+
+            generateBtn.disabled = true;
+            generateBtn.textContent = 'Generating...';
+            try {
+                const csrfToken = document.querySelector('[name="csrfmiddlewaretoken"]').value;
+                const payload = { topic, current_questions: questions };
+                if (builderEl && builderEl.dataset.sessionId) {
+                    payload.session_id = builderEl.dataset.sessionId;
+                }
+                if (knowledgeField) {
+                    payload.knowledge_base = knowledgeField.value || '';
+                }
+                const response = await fetch('{% url "generate_questions_api" %}', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrfToken,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload),
+                });
+                const data = await response.json();
+                if (!data.success) {
+                    throw new Error(data.error || 'Failed to generate suggestions.');
+                }
+
+                const suggestions = Array.isArray(data.questions) ? data.questions : [];
+                suggestionsList.innerHTML = '';
+                if (!suggestions.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'list-group-item text-muted';
+                    empty.textContent = 'No suggestions returned.';
+                    suggestionsList.appendChild(empty);
+                } else {
+                    suggestions.forEach((suggestion) => {
+                        const item = document.createElement('div');
+                        item.className = 'list-group-item d-flex justify-content-between align-items-center gap-2';
+
+                        const textNode = document.createElement('div');
+                        textNode.className = 'flex-grow-1';
+                        textNode.textContent = suggestion;
+
+                        const addSuggestionBtn = document.createElement('button');
+                        addSuggestionBtn.type = 'button';
+                        addSuggestionBtn.className = 'btn btn-sm btn-outline-primary';
+                        addSuggestionBtn.textContent = 'Add';
+                        addSuggestionBtn.addEventListener('click', () => addQuestion(suggestion));
+
+                        item.appendChild(textNode);
+                        item.appendChild(addSuggestionBtn);
+                        suggestionsList.appendChild(item);
+                    });
+                }
+                suggestionsContainer.classList.remove('d-none');
+            } catch (error) {
+                alert('Error generating questions: ' + error.message);
+            } finally {
+                generateBtn.disabled = false;
+                generateBtn.textContent = 'Generate Suggestions';
+            }
+        });
+    }
+
     // Persona Builder
     const personaHiddenField = document.getElementById('id_personas');
     const personaListEl = document.getElementById('personaList');

@@ -44,22 +44,57 @@ class RagService:
     # ------------------------------------------------------------------
     # Index management
     # ------------------------------------------------------------------
-    def build_index(self) -> int:
-        """Recreate the vector index from the session's knowledge base."""
+    def build_index(self, raw_text: str | None = None) -> int:
+        """Recreate the vector index from the session's knowledge base or from
+        an explicit raw_text provided by callers (useful for uploaded files).
 
-        raw_text = (self.session.knowledge_base or "").strip()
+        If raw_text is None the method falls back to the session.knowledge_base
+        attribute (if it exists) or an empty string.
+        """
+
+        # Allow callers to override the source text (for uploads or temporary data)
+        if raw_text is None:
+            raw_text = getattr(self.session, "knowledge_base", None) or ""
+        raw_text = str(raw_text).strip()
         self._reset_collection()
         if not raw_text:
-            self.session.rag_chunk_count = 0
-            self.session.rag_last_built_at = timezone.now()
-            self.session.save(update_fields=["rag_chunk_count", "rag_last_built_at"])
+            if hasattr(self.session, "rag_chunk_count"):
+                self.session.rag_chunk_count = 0
+            if hasattr(self.session, "rag_last_built_at"):
+                self.session.rag_last_built_at = timezone.now()
+            # If the session model supports save/update fields, persist where applicable
+            try:
+                if hasattr(self.session, "save"):
+                    update_fields = []
+                    if hasattr(self.session, "rag_chunk_count"):
+                        update_fields.append("rag_chunk_count")
+                    if hasattr(self.session, "rag_last_built_at"):
+                        update_fields.append("rag_last_built_at")
+                    if update_fields:
+                        self.session.save(update_fields=update_fields)
+            except Exception:
+                # Best-effort only
+                pass
             return 0
 
+        # Split the provided text into chunks for indexing
         chunks = self._text_splitter.split_text(raw_text)
         if not chunks:
-            self.session.rag_chunk_count = 0
-            self.session.rag_last_built_at = timezone.now()
-            self.session.save(update_fields=["rag_chunk_count", "rag_last_built_at"])
+            if hasattr(self.session, "rag_chunk_count"):
+                self.session.rag_chunk_count = 0
+            if hasattr(self.session, "rag_last_built_at"):
+                self.session.rag_last_built_at = timezone.now()
+            try:
+                if hasattr(self.session, "save"):
+                    update_fields = []
+                    if hasattr(self.session, "rag_chunk_count"):
+                        update_fields.append("rag_chunk_count")
+                    if hasattr(self.session, "rag_last_built_at"):
+                        update_fields.append("rag_last_built_at")
+                    if update_fields:
+                        self.session.save(update_fields=update_fields)
+            except Exception:
+                pass
             return 0
 
         # Prepare ids and metadata so we can print key/value pairs for each chunk
@@ -94,9 +129,21 @@ class RagService:
             print()
             logger.info("RAG chunk %d (id=%s session=%s)", index, cid, self.session.s_id)
         self._collection.add(ids=chunk_ids, documents=chunks, metadatas=chunk_metadata)
-        self.session.rag_chunk_count = len(chunks)
-        self.session.rag_last_built_at = timezone.now()
-        self.session.save(update_fields=["rag_chunk_count", "rag_last_built_at"])
+        if hasattr(self.session, "rag_chunk_count"):
+            self.session.rag_chunk_count = len(chunks)
+        if hasattr(self.session, "rag_last_built_at"):
+            self.session.rag_last_built_at = timezone.now()
+        try:
+            if hasattr(self.session, "save"):
+                update_fields = []
+                if hasattr(self.session, "rag_chunk_count"):
+                    update_fields.append("rag_chunk_count")
+                if hasattr(self.session, "rag_last_built_at"):
+                    update_fields.append("rag_last_built_at")
+                if update_fields:
+                    self.session.save(update_fields=update_fields)
+        except Exception:
+            pass
         return len(chunks)
 
     def _get_or_create_collection(self):
