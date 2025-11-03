@@ -1,0 +1,348 @@
+// GRADER FEATURE ARCHITECTURE DIAGRAM
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        GRADER FEATURE OVERVIEW                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─── USER WORKFLOWS ──────────────────────────────────────────────────────────┐
+
+MODERATOR WORKFLOW:
+  1. System Choice (/)
+       ↓
+  2. Grader Entry (/grader/)
+       ↓
+  3. Moderator Dashboard (/grader/moderator/)
+       ├─ Create Session
+       ├─ Add Questions (dynamic builder)
+       ├─ Set Description (markdown, 6000+ words)
+       ├─ Optional: Upload Knowledge Base
+       ├─ Activate Session
+       └─ Share Participant URL: /grader/user/<id>/
+
+  4. Collect Responses (participants submit via /grader/user/<id>/)
+
+  5. Analysis
+       ├─ Click "Analyze Responses"
+       ├─ Calculate Average Scores per Feature
+       ├─ Call OpenAI LLM to Summarize Reasons
+       └─ Display Markdown Report
+
+  6. Export
+       └─ Download CSV with All Responses
+
+
+PARTICIPANT WORKFLOW:
+  1. Receive URL: /grader/user/<their_id>/
+       ↓
+  2. View Session Description (markdown-rendered)
+       ↓
+  3. For Each Question:
+       ├─ Enter Score (1-10)
+       └─ Write Reason
+       ↓
+  4. Optional: Add Additional Comments
+       ↓
+  5. Click "Submit Scores"
+       ↓
+  6. Confirmation & Back to System Choice
+
+
+└────────────────────────────────────────────────────────────────────────────────┘
+
+┌─── DATABASE LAYER ──────────────────────────────────────────────────────────┐
+
+GraderSession
+├─ s_id (unique)
+├─ topic
+├─ description (TextField, supports markdown)
+├─ objective_questions (JSONField: list of strings)
+├─ knowledge_base (optional, for RAG)
+├─ rag_chunk_count
+├─ rag_last_built_at
+├─ user_instructions
+├─ is_active
+├─ created_at, updated_at
+└─ Methods:
+   ├─ get_question_sequence()
+   ├─ get_active()
+   └─ activate()
+
+GraderResponse
+├─ session (FK → GraderSession)
+├─ user_id (PositiveIntegerField)
+├─ scores (JSONField: [1-10, 1-10, ...])
+├─ reasons (JSONField: ["reason1", "reason2", ...])
+├─ additional_comments (TextField)
+├─ submitted_at (auto_now_add)
+└─ Constraint: UNIQUE(session_id, user_id)
+
+└────────────────────────────────────────────────────────────────────────────────┘
+
+┌─── VIEWS LAYER ─────────────────────────────────────────────────────────────┐
+
+grader_entry_point()
+  ├─ Route: GET /grader/
+  ├─ Returns: grader_entry.html
+  └─ Purpose: Landing page for moderators
+
+grader_moderator_dashboard()
+  ├─ Route: GET /grader/moderator/ (init form)
+  ├─ Route: POST /grader/moderator/ (actions)
+  ├─ Actions:
+  │  ├─ load_session
+  │  ├─ save_session / create_session
+  │  ├─ activate_session
+  │  ├─ run_rag (build RAG index)
+  │  └─ analyze (LLM-powered analysis)
+  ├─ Context:
+  │  ├─ selected_session (GraderSession)
+  │  ├─ session_form (GraderSessionForm)
+  │  ├─ sessions (all GraderSession objects)
+  │  └─ selection_form (GraderSessionSelectionForm)
+  └─ Template: grader_moderator_dashboard.html
+
+grader_user_view()
+  ├─ Route: GET /grader/user/<user_id>/
+  ├─ Route: POST /grader/user/<user_id>/
+  ├─ Dynamic Form Generation:
+  │  └─ For each question in session.objective_questions:
+  │     ├─ Score input (1-10)
+  │     ├─ Reason textarea
+  │     └─ Additional comments
+  ├─ On Submit:
+  │  └─ Creates or updates GraderResponse
+  └─ Template: grader_user_conversation.html
+
+grader_export_csv()
+  ├─ Route: GET /grader/export/<session_id>/
+  ├─ Processing:
+  │  ├─ Fetch session by ID
+  │  ├─ Get all responses for session
+  │  ├─ Build CSV with columns:
+  │  │  ├─ User ID
+  │  │  ├─ Q1 Score, Q1 Reason
+  │  │  ├─ Q2 Score, Q2 Reason
+  │  │  ├─ ...
+  │  │  └─ Additional Comments
+  │  └─ Stream as file download
+  └─ Response: HTTP file download
+
+└────────────────────────────────────────────────────────────────────────────────┘
+
+┌─── ANALYSIS ENGINE ─────────────────────────────────────────────────────────┐
+
+analyze() [within grader_moderator_dashboard]:
+
+  1. Fetch all GraderResponse objects for session
+  
+  2. Extract scores and reasons by question
+     scores_by_q = [[8, 7, 9], [6, 8, 8], ...]
+     reasons_by_q = [["reason1", "reason2", "reason3"], ...]
+  
+  3. Calculate averages
+     avg_q1 = sum([8, 7, 9]) / 3 = 8.0
+     avg_q2 = sum([6, 8, 8]) / 3 = 7.33
+  
+  4. For each question, call OpenAI:
+     System Prompt: "Summarize grader feedback for this feature"
+     User Prompt: "Question: <Q>\n\nReasons:\n<all reasons>\n\nSummarize..."
+     Response: 3-6 sentence summary
+  
+  5. Generate Markdown Report:
+     # Analysis for <topic>
+     
+     ## Question 1: <Q1>
+     **Average score:** 8.00
+     **Summary of reasons:**
+     <AI-generated summary>
+     
+     ## Question 2: <Q2>
+     **Average score:** 7.33
+     **Summary of reasons:**
+     <AI-generated summary>
+  
+  6. Save report to session.user_instructions (acts as notes)
+
+└────────────────────────────────────────────────────────────────────────────────┘
+
+┌─── FORM LAYER ──────────────────────────────────────────────────────────────┐
+
+GraderSessionForm
+  ├─ Fields:
+  │  ├─ s_id (required, unique identifier)
+  │  ├─ topic (required, session title)
+  │  ├─ description (optional, markdown support)
+  │  ├─ objective_questions (hidden JSON, managed by JavaScript)
+  │  ├─ knowledge_base (optional, for RAG)
+  │  └─ user_instructions (optional, instructions for graders)
+  └─ Validation:
+     └─ Parses objective_questions JSON and cleans
+
+GraderSessionSelectionForm
+  ├─ Field:
+  │  └─ session_id (dropdown of existing sessions)
+  └─ Purpose: Load existing session for editing
+
+GraderResponseForm
+  ├─ Base class (instantiated dynamically in view)
+  └─ Additional fields:
+     └─ additional_comments (optional free-text)
+
+└────────────────────────────────────────────────────────────────────────────────┘
+
+┌─── TEMPLATES ───────────────────────────────────────────────────────────────┐
+
+system_choice.html [MODIFIED]
+  └─ Added: Grader button (alongside AI-Human and AI-AI)
+
+grader_entry.html [NEW]
+  ├─ Displays: "Grader" title and welcome message
+  └─ Links to: Moderator dashboard
+
+grader_moderator_dashboard.html [NEW]
+  ├─ Session Selection Dropdown
+  ├─ Session Form:
+  │  ├─ s_id, topic, description inputs
+  │  ├─ Dynamic Question Builder (JavaScript):
+  │  │  ├─ Add question button
+  │  │  ├─ List with Up/Down/Remove buttons
+  │  │  └─ Reorder functionality
+  │  ├─ Knowledge Base textarea
+  │  └─ User Instructions textarea
+  ├─ Action Buttons:
+  │  ├─ Save Changes
+  │  ├─ Save As New
+  │  ├─ Activate Session
+  │  ├─ Run RAG
+  │  └─ Analyze Responses
+  ├─ CSV Download Link
+  └─ Sessions Sidebar (list all sessions)
+
+grader_user_conversation.html [NEW]
+  ├─ Header:
+  │  ├─ Session title
+  │  └─ Markdown-rendered description
+  ├─ Form:
+  │  ├─ For each question:
+  │  │  ├─ Question number and text (bold)
+  │  │  ├─ Score input (number, 1-10, required)
+  │  │  └─ Reason textarea (required)
+  │  ├─ Additional Comments textarea (optional)
+  │  └─ Submit button
+  └─ Cancel link back to system choice
+
+└────────────────────────────────────────────────────────────────────────────────┘
+
+┌─── ROUTING ─────────────────────────────────────────────────────────────────┐
+
+URL Pattern                          View Function                  Template
+─────────────────────────────────────────────────────────────────────────────
+/grader/                             grader_entry_point()           grader_entry.html
+/grader/moderator/                   grader_moderator_dashboard()   grader_moderator_dashboard.html
+/grader/user/<int:user_id>/          grader_user_view()             grader_user_conversation.html
+/grader/export/<int:session_id>/     grader_export_csv()            (CSV download)
+
+└────────────────────────────────────────────────────────────────────────────────┘
+
+┌─── DATA FLOW ───────────────────────────────────────────────────────────────┐
+
+MODERATOR CREATES SESSION:
+  /grader/moderator/ (POST)
+    ↓
+  grader_moderator_dashboard(action="create_session")
+    ↓
+  GraderSessionForm.save()
+    ↓
+  GraderSession.objects.create()
+    ↓
+  PostgreSQL: INSERT INTO core_gradersession ...
+
+PARTICIPANT SUBMITS SCORES:
+  /grader/user/<id>/ (POST)
+    ↓
+  grader_user_view(request, user_id)
+    ↓
+  Extract: scores[], reasons[], additional_comments
+    ↓
+  GraderResponse.objects.update_or_create()
+    ↓
+  PostgreSQL: INSERT or UPDATE core_graderresponse ...
+
+MODERATOR ANALYZES:
+  /grader/moderator/ (POST, action="analyze")
+    ↓
+  grader_moderator_dashboard()
+    ↓
+  GraderResponse.objects.filter(session=selected_session)
+    ↓
+  Calculate averages
+    ↓
+  For each question:
+    call OpenAI API
+      ↓
+    get summary
+    ↓
+  Build markdown report
+    ↓
+  session.user_instructions = markdown_report
+  session.save()
+    ↓
+  PostgreSQL: UPDATE core_gradersession ...
+
+MODERATOR EXPORTS:
+  /grader/export/<session_id>/ (GET)
+    ↓
+  grader_export_csv(request, session_id)
+    ↓
+  GraderResponse.objects.filter(session_id=session_id)
+    ↓
+  Generate CSV in memory
+    ↓
+  Stream as HTTP file download
+
+└────────────────────────────────────────────────────────────────────────────────┘
+
+┌─── KEY FEATURES ────────────────────────────────────────────────────────────┐
+
+✅ Large Description Support
+   - Accepts up to 6000+ words
+   - Rendered as markdown for participants
+   - Supports bold, italics, headings, links, lists
+
+✅ Dynamic Question Management
+   - Add/remove questions via UI
+   - Reorder questions (Up/Down buttons)
+   - JavaScript handles client-side state management
+   - JSON stored in database
+
+✅ Score Validation
+   - 1-10 numeric input only
+   - Required fields enforced
+   - Server-side validation
+
+✅ AI-Powered Analysis
+   - Average calculation per feature
+   - LLM summarization of reasons
+   - Markdown-formatted output
+   - Fallback error handling
+
+✅ CSV Export
+   - One row per participant
+   - Proper escaping and formatting
+   - Easy import to Excel/Sheets
+   - Includes all scores, reasons, comments
+
+✅ Session Management
+   - Only one active session at a time
+   - Create, edit, activate, deactivate
+   - Unique user ID + session ensures single response per user
+
+✅ RAG Integration
+   - Optional knowledge base upload
+   - Supports .txt and .csv files
+   - Chunking and indexing support
+   - Reusable with same RagService
+
+└────────────────────────────────────────────────────────────────────────────────┘
+
+END OF ARCHITECTURE DIAGRAM

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-6">
+        <div class="card content-card p-4">
+            <h2 class="fs-4 mb-3">Grader - Enter Your ID</h2>
+            <form method="post" novalidate>
+                {% csrf_token %}
+                {{ form.as_p }}
+                <div class="d-flex justify-content-end gap-2">
+                    <a href="{% url 'system_choice' %}" class="btn btn-outline-secondary">Back</a>
+                    <button type="submit" class="btn btn-primary">Continue</button>
+                </div>
+            </form>
+            <hr class="my-3">
+            <p class="text-muted small mb-0">
+                <strong>Moderators:</strong> Enter ID <code>0</code> to access the moderator dashboard.
+            </p>
+            {% if active_session %}
+            <p class="text-muted small mb-0 mt-2">
+                Active session: <strong>{{ active_session.s_id }}</strong>{% if active_session.topic %} — Topic: {{ active_session.topic }}{% endif %}
+            </p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+

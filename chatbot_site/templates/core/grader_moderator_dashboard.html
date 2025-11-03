@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% load analysis_tags %}
+
+{% block content %}
+<div class="row gy-4">
+    <div class="col-12 col-lg-8">
+        <div class="card content-card p-4 mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h2 class="fs-5 mb-0">Select Grader Session</h2>
+                <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#newGraderSessionModal">New Session</button>
+            </div>
+            <form method="post" novalidate class="row g-2" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="col-12">
+                    {{ selection_form.session_id.label_tag }}
+                    {{ selection_form.session_id }}
+                </div>
+                <div class="col-12 d-flex justify-content-end">
+                    <button type="submit" class="btn btn-secondary" name="action" value="load_session">Load Session</button>
+                </div>
+                <p class="text-muted small mb-0">Select an existing grader session to load it for editing.</p>
+            </form>
+        </div>
+
+        <div class="card content-card p-4">
+            <h2 class="fs-4 mb-3">Moderator Controls</h2>
+            <form method="post" novalidate enctype="multipart/form-data">
+                {% csrf_token %}
+                {{ session_form.non_field_errors }}
+
+                <div class="mb-3">
+                    {{ session_form.s_id.label_tag }}
+                    {{ session_form.s_id }}
+                </div>
+
+                <div class="mb-3">
+                    {{ session_form.topic.label_tag }}
+                    {{ session_form.topic }}
+                </div>
+
+                <div class="mb-3">
+                    {{ session_form.description.label_tag }}
+                    {{ session_form.description }}
+                </div>
+
+                {{ session_form.objective_questions }}
+                <div class="mb-3" id="graderQuestionBuilder" data-session-id="{{ selected_session.pk|default:'' }}">
+                    <label class="form-label">Objective Questions</label>
+                    <p class="form-text">Questions are asked in the order shown below. Reorder or remove them to shape the grading instrument.</p>
+                    <div id="graderQuestionList" class="list-group mb-3"></div>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="graderManualQuestionInput" placeholder="Type a new question and click Add">
+                        <button type="button" class="btn btn-outline-primary" id="graderAddManualQuestionBtn">Add</button>
+                    </div>
+                    {% for error in session_form.objective_questions.errors %}
+                        <div class="text-danger small mt-2">{{ error }}</div>
+                    {% endfor %}
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Knowledge base (optional)</label>
+                    {{ session_form.knowledge_base }}
+                    <div class="form-text">You can paste text here or upload a .txt/.csv file to build the RAG index.</div>
+                    <input type="file" id="id_grader_knowledge_file" name="knowledge_file" accept=".txt,.csv" class="form-control mt-2" style="max-width:320px;" />
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">LLM Instructions <span class="text-muted">(optional)</span></label>
+                    <p class="form-text small mb-2">These instructions will be included in every LLM prompt for analysis tasks in this session.</p>
+                    {{ session_form.user_instructions }}
+                    <div class="form-text">Example: "Focus on user experience implications" or "Consider cost-benefit analysis"</div>
+                </div>
+
+                <div class="d-flex flex-wrap gap-2 mt-4">
+                    <button type="submit" class="btn btn-primary" name="action" value="save_session" {% if not selected_session %}disabled{% endif %}>Save Changes</button>
+                    <button type="submit" class="btn btn-outline-primary" name="action" value="create_session">Save As New</button>
+                    <button type="submit" class="btn btn-success" name="action" value="activate_session" {% if not selected_session or selected_session.is_active %}disabled{% endif %}>Activate Session</button>
+                    <button type="submit" class="btn btn-outline-secondary" name="action" value="run_rag" {% if not selected_session %}disabled{% endif %}>Run RAG</button>
+                    <button type="submit" class="btn btn-warning" name="action" value="analyze" {% if not selected_session %}disabled{% endif %}>Analyze Responses</button>
+                </div>
+
+                {% if selected_session %}
+                <div class="mt-3">
+                    <hr>
+                    <p class="text-muted mb-2">Downloads and actions:</p>
+                    <div class="d-flex gap-2">
+                        <a href="{% url 'grader_export' selected_session.pk %}" class="btn btn-outline-info btn-sm">Download Responses (CSV)</a>
+                        <a href="{% url 'system_choice' %}" class="btn btn-outline-secondary btn-sm">Back to Choice</a>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if selected_session %}
+                    <dl class="row small text-muted mt-3 mb-0">
+                        <dt class="col-sm-5">Session ID</dt>
+                        <dd class="col-sm-7">{{ selected_session.s_id }}</dd>
+                        <dt class="col-sm-5">Active</dt>
+                        <dd class="col-sm-7">{{ selected_session.is_active|yesno:"Yes,No" }}</dd>
+                        <dt class="col-sm-5">Questions</dt>
+                        <dd class="col-sm-7">{{ selected_session.objective_questions|length }}</dd>
+                    </dl>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+
+    <div class="col-12 col-lg-4">
+        <div class="card content-card p-4">
+            <h3 class="fs-5 mb-3">Sessions</h3>
+            {% if sessions %}
+                <ul class="list-group list-group-flush">
+                    {% for session in sessions %}
+                        <li class="list-group-item d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>{{ session.s_id }}</strong>
+                                <br>
+                                <span class="text-muted small">{{ session.topic }}</span>
+                            </div>
+                            <span class="badge {% if session.is_active %}bg-primary{% else %}bg-secondary{% endif %}">
+                                {% if session.is_active %}Active{% else %}Inactive{% endif %}
+                            </span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="text-muted mb-0">No sessions yet.</p>
+            {% endif %}
+        </div>
+
+        {% if selected_session %}
+        <div class="card content-card p-4 mt-4">
+            <h3 class="fs-5 mb-3">Analysis Summary</h3>
+            {% if selected_session.analysis_markdown %}
+                <div class="markdown-box mb-0">{{ selected_session.analysis_markdown|render_markdown|safe }}</div>
+            {% else %}
+                <p class="text-muted mb-0">Run an analysis to generate a summary of grader feedback.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Create New Grader Session Modal -->
+<div class="modal fade" id="newGraderSessionModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5">Create New Grader Session</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="newGraderSessionForm" method="post" novalidate>
+                {% csrf_token %}
+                <input type="hidden" name="action" value="create_session">
+                <input type="hidden" name="objective_questions" id="modal_grader_objective_questions" value="[]">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="id_grader_session_id_modal" class="form-label">Session ID <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="id_grader_session_id_modal" name="s_id" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="id_grader_topic_modal" class="form-label">Topic <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="id_grader_topic_modal" name="topic" required>
+                    </div>
+                    <div id="graderSessionFormErrors" class="alert alert-danger d-none"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// Minimal question builder for grader moderator dashboard
+document.addEventListener('DOMContentLoaded', function() {
+    const questionHiddenField = document.getElementById('id_objective_questions');
+    const questionListEl = document.getElementById('graderQuestionList');
+    const addQuestionBtn = document.getElementById('graderAddManualQuestionBtn');
+    const questionInputEl = document.getElementById('graderManualQuestionInput');
+
+    let questions = [];
+    const sync = () => { if (questionHiddenField) questionHiddenField.value = JSON.stringify(questions); };
+    const render = () => {
+        sync();
+        questionListEl.innerHTML = '';
+        if (!questions.length) {
+            const empty = document.createElement('div');
+            empty.className = 'list-group-item text-muted';
+            empty.textContent = 'No questions yet.';
+            questionListEl.appendChild(empty);
+            return;
+        }
+        questions.forEach((q, idx) => {
+            const item = document.createElement('div');
+            item.className = 'list-group-item d-flex justify-content-between align-items-center';
+            item.innerHTML = `<div class="flex-grow-1">${idx+1}. ${q}</div>`;
+            const btns = document.createElement('div');
+            btns.className = 'btn-group btn-group-sm';
+            const up = document.createElement('button'); up.type='button'; up.className='btn btn-outline-secondary'; up.textContent='Up'; up.disabled = idx===0; up.onclick = () => { const t = questions.splice(idx,1)[0]; questions.splice(idx-1,0,t); render(); };
+            const down = document.createElement('button'); down.type='button'; down.className='btn btn-outline-secondary'; down.textContent='Down'; down.disabled = idx===questions.length-1; down.onclick = () => { const t = questions.splice(idx,1)[0]; questions.splice(idx+1,0,t); render(); };
+            const rem = document.createElement('button'); rem.type='button'; rem.className='btn btn-outline-danger'; rem.textContent='Remove'; rem.onclick = () => { questions.splice(idx,1); render(); };
+            btns.appendChild(up); btns.appendChild(down); btns.appendChild(rem);
+            item.appendChild(btns);
+            questionListEl.appendChild(item);
+        });
+    };
+    if (addQuestionBtn && questionInputEl) {
+        addQuestionBtn.onclick = () => { const t = questionInputEl.value.trim(); if (!t) return; questions.push(t); questionInputEl.value=''; render(); };
+    }
+    if (questionHiddenField && questionHiddenField.value) {
+        try { questions = JSON.parse(questionHiddenField.value);} catch(e){ questions = []; }
+        render();
+    }
+});
+</script>
+{% endblock %}

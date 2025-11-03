@@ -28,13 +28,24 @@
                         AI-AI Deliberation
                     </button>
                 </form>
+
+                <form method="post" novalidate class="w-100">
+                    {% csrf_token %}
+                    <button type="submit" name="choice" value="grader" class="btn btn-lg btn-warning w-100">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" class="bi bi-stickies me-2" viewBox="0 0 16 16">
+                            <path d="M3 0a2 2 0 0 0-2 2v9.5A1.5 1.5 0 0 0 2.5 13H6v2.5A1.5 1.5 0 0 0 7.5 17H15a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H3z"/>
+                        </svg>
+                        Grader
+                    </button>
+                </form>
             </div>
             
             <hr class="my-4">
             
             <p class="text-muted small mb-0">
                 <strong>AI-Human Deliberation:</strong> Participants discuss with AI facilitation<br>
-                <strong>AI-AI Deliberation:</strong> Multiple AI agents debate a topic
+                <strong>AI-AI Deliberation:</strong> Multiple AI agents debate a topic<br>
+                <strong>Grader:</strong> Participants assign numeric scores (1–10) to objective features and provide reasons
             </p>
         </div>
     </div>

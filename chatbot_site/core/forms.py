@@ -3,6 +3,7 @@ import json
 from django import forms
 
 from .models import DiscussionSession, AIDeliberationSession
+from .models import GraderSession, GraderResponse
 
 
 class ParticipantIdForm(forms.Form):
@@ -207,4 +208,84 @@ class UserMessageForm(forms.Form):
         label="Your Response",
         widget=forms.Textarea(attrs={"rows": 5, "class": "form-control"}),
         max_length=4000,
+    )
+
+
+class GraderSessionForm(forms.ModelForm):
+    objective_questions = forms.CharField(widget=forms.HiddenInput(), required=False)
+
+    class Meta:
+        model = GraderSession
+        fields = [
+            "s_id",
+            "topic",
+            "description",
+            "objective_questions",
+            "knowledge_base",
+            "user_instructions",
+        ]
+        widgets = {
+            "s_id": forms.TextInput(attrs={"class": "form-control", "placeholder": "Unique session identifier"}),
+            "topic": forms.TextInput(attrs={"class": "form-control"}),
+            "description": forms.Textarea(attrs={"rows": 6, "class": "form-control", "placeholder": "Detailed session description (markdown supported)"}),
+            "knowledge_base": forms.Textarea(attrs={"rows": 6, "class": "form-control", "placeholder": "Moderator knowledge base for RAG"}),
+            "user_instructions": forms.Textarea(attrs={"rows": 4, "class": "form-control", "placeholder": "Optional instructions for graders"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        questions = []
+        if self.instance and self.instance.pk:
+            questions = self.instance.get_question_sequence()
+        self.fields["objective_questions"].initial = json.dumps(questions)
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.objective_questions = self.cleaned_data.get("objective_questions", [])
+        if commit:
+            instance.save()
+        return instance
+
+    def clean_objective_questions(self):
+        raw = self.cleaned_data.get("objective_questions")
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise forms.ValidationError("Unable to decode question list.") from exc
+        if not isinstance(parsed, list):
+            raise forms.ValidationError("Question list must be an array of strings.")
+
+        cleaned: list[str] = []
+        for entry in parsed:
+            text = str(entry).strip()
+            if text:
+                cleaned.append(text)
+        return cleaned
+
+
+class GraderSessionSelectionForm(forms.Form):
+    session_id = forms.ChoiceField(label="Active grader session", required=False)
+
+    def __init__(self, *args, sessions=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        session_choices = [("", "Create new grader session")]
+        if sessions is not None:
+            session_choices.extend(
+                (str(session.pk), f"{session.s_id} — {session.topic or 'No topic'}")
+                for session in sessions
+            )
+        self.fields["session_id"].choices = session_choices
+        self.fields["session_id"].widget.attrs.update({"class": "form-select"})
+
+
+class GraderResponseForm(forms.Form):
+    """Form presented to graders where each objective question gets a score and a reason."""
+
+    # This form will be created dynamically by the view based on the session questions.
+    additional_comments = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 4, "class": "form-control"}),
+        label="Any additional comments",
     )

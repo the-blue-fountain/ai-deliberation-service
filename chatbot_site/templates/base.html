@@ -16,7 +16,13 @@
     <div class="container">
         <header class="mb-4 d-flex flex-wrap justify-content-between align-items-center gap-2">
             <h1 class="fs-3 fw-semibold mb-0">AI-Facilitated Topic Explorer</h1>
-            <a href="{% url 'entry' %}" class="btn btn-outline-primary">Switch ID / Log Out</a>
+            {% if deliberation_mode == 'grader' %}
+                <a href="{% url 'grader_entry' %}" class="btn btn-outline-primary">Switch ID / Log Out</a>
+            {% elif deliberation_mode == 'ai' %}
+                <a href="{% url 'ai_entry' %}" class="btn btn-outline-primary">Switch ID / Log Out</a>
+            {% else %}
+                <a href="{% url 'entry' %}" class="btn btn-outline-primary">Switch ID / Log Out</a>
+            {% endif %}
         </header>
         {% if messages %}
             {% for message in messages %}

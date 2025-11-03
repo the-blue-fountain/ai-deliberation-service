@@ -1,6 +1,14 @@
 from django.contrib import admin
 
-from .models import DiscussionSession, UserConversation, AIDeliberationSession, AIDebateRun, AIDebateSummary
+from .models import (
+    DiscussionSession,
+    UserConversation,
+    AIDeliberationSession,
+    AIDebateRun,
+    AIDebateSummary,
+    GraderSession,
+    GraderResponse,
+)
 
 
 @admin.register(DiscussionSession)
@@ -64,4 +72,20 @@ class AIDebateSummaryAdmin(admin.ModelAdmin):
     list_display = ("session", "created_at")
     search_fields = ("session__s_id", "topic")
     readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(GraderSession)
+class GraderSessionAdmin(admin.ModelAdmin):
+    list_display = ("s_id", "topic", "is_active", "created_at")
+    list_filter = ("is_active", "created_at")
+    fields = ("s_id", "topic", "description", "objective_questions", "knowledge_base")
+    search_fields = ("s_id", "topic")
+    readonly_fields = ("created_at", "updated_at", "rag_chunk_count", "rag_last_built_at")
+
+
+@admin.register(GraderResponse)
+class GraderResponseAdmin(admin.ModelAdmin):
+    list_display = ("session", "user_id", "submitted_at")
+    search_fields = ("session__s_id", "user_id")
+    readonly_fields = ("submitted_at",)
 

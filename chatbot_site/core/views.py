@@ -478,6 +478,8 @@ def system_choice(request: HttpRequest) -> HttpResponse:
             return redirect("entry")
         elif choice == "ai":
             return redirect("ai_entry")
+        elif choice == "grader":
+            return redirect("grader_entry")
     return render(request, "core/system_choice.html")
 
 
@@ -485,6 +487,33 @@ def ai_entry_point(request: HttpRequest) -> HttpResponse:
     """Entry point for AI-only deliberation (moderator access)."""
     session = _get_or_create_default_ai_session()
     return render(request, "core/ai_entry.html", {"active_session": session})
+
+
+def grader_entry_point(request: HttpRequest) -> HttpResponse:
+    """Entry point for Grader sessions (participant access)."""
+    from .models import GraderSession
+    from .forms import ParticipantIdForm
+
+    session = GraderSession.get_active()
+    if request.method == "POST":
+        form = ParticipantIdForm(request.POST)
+        if form.is_valid():
+            participant_id = form.cleaned_data["participant_id"]
+            if participant_id == 0:
+                return redirect("grader_moderator_dashboard")
+            return redirect("grader_user", user_id=participant_id)
+    else:
+        form = ParticipantIdForm()
+
+    return render(
+        request,
+        "core/grader_entry.html",
+        {
+            "form": form,
+            "active_session": session,
+            "deliberation_mode": "grader",
+        },
+    )
 
 
 def ai_moderator_dashboard(request: HttpRequest) -> HttpResponse:
@@ -629,6 +658,268 @@ def ai_moderator_dashboard(request: HttpRequest) -> HttpResponse:
     return render(request, "core/ai_moderator_dashboard.html", context)
 
 
+def grader_moderator_dashboard(request: HttpRequest) -> HttpResponse:
+    """Moderator dashboard for Grader sessions."""
+    from .forms import GraderSessionForm, GraderSessionSelectionForm
+    from .models import GraderSession, GraderResponse
+    from .services.rag_service import RagService
+
+    sessions = GraderSession.objects.all().order_by("-updated_at")
+    selected_session = None
+
+    query_session_id = request.GET.get("session_id")
+    if query_session_id:
+        try:
+            selected_session = sessions.filter(pk=int(query_session_id)).first()
+            if selected_session:
+                request.session["grader_moderator_selected_session_id"] = int(query_session_id)
+        except (TypeError, ValueError):
+            pass
+
+    if selected_session is None:
+        selected_session_id = request.session.get("grader_moderator_selected_session_id")
+        if selected_session_id:
+            selected_session = sessions.filter(pk=selected_session_id).first()
+
+    if selected_session is None:
+        selected_session = sessions.filter(is_active=True).order_by("-updated_at").first()
+
+    session_form: GraderSessionForm
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+
+        if action == "load_session":
+            target_id = request.POST.get("session_id")
+            if target_id:
+                try:
+                    request.session["grader_moderator_selected_session_id"] = int(target_id)
+                except (TypeError, ValueError):
+                    messages.error(request, "Unable to load the requested session.")
+                else:
+                    return redirect("grader_moderator_dashboard")
+            else:
+                request.session.pop("grader_moderator_selected_session_id", None)
+                return redirect("grader_moderator_dashboard")
+
+        if action in {"save_session", "create_session"}:
+            instance = selected_session if (action == "save_session" and selected_session) else None
+            session_form = GraderSessionForm(request.POST, instance=instance)
+            if session_form.is_valid():
+                new_session = session_form.save(commit=False)
+                if not new_session.pk:
+                    new_session.is_active = False
+                new_session.save()
+                request.session["grader_moderator_selected_session_id"] = new_session.pk
+                messages.success(request, "Grader session saved.")
+                return redirect("grader_moderator_dashboard")
+            else:
+                messages.error(request, "Please fix the errors below.")
+        elif action == "activate_session":
+            if selected_session is None:
+                messages.error(request, "Select a session before activating it.")
+            else:
+                selected_session.activate()
+                request.session["grader_moderator_selected_session_id"] = selected_session.pk
+                messages.success(request, f"Grader session {selected_session.s_id} is now active.")
+                return redirect("grader_moderator_dashboard")
+        elif action == "run_rag":
+            if selected_session is None:
+                messages.error(request, "Save or select a session before rebuilding the index.")
+            else:
+                raw_text = None
+                uploaded = request.FILES.get('knowledge_file')
+                if uploaded is not None:
+                    try:
+                        content = uploaded.read()
+                        try:
+                            text = content.decode('utf-8')
+                        except Exception:
+                            text = content.decode('latin-1')
+                        name = (uploaded.name or '').lower()
+                        if name.endswith('.csv'):
+                            import csv, io
+                            reader = csv.reader(io.StringIO(text))
+                            rows = [', '.join([cell for cell in row]) for row in reader]
+                            raw_text = '\n'.join(rows)
+                        else:
+                            raw_text = text
+                    except Exception as exc:
+                        messages.error(request, f"Failed to read uploaded file: {exc}")
+                        return redirect("grader_moderator_dashboard")
+                else:
+                    raw_text = request.POST.get('knowledge_base') or None
+
+                try:
+                    chunk_count = RagService(selected_session).build_index(raw_text=raw_text)
+                except Exception as exc:
+                    messages.error(request, f"Failed to rebuild the RAG index: {exc}")
+                else:
+                    if chunk_count == 0:
+                        messages.warning(request, "RAG index is empty. Add knowledge base content before rebuilding.")
+                    else:
+                        messages.success(request, f"RAG index rebuilt with {chunk_count} knowledge snippets.")
+                return redirect("grader_moderator_dashboard")
+        elif action == "analyze":
+            # Run analysis across all responses for the selected session
+            if not selected_session:
+                messages.error(request, "Select a session before analyzing.")
+            else:
+                # Compute averages and call the LLM to summarize reasons per feature
+                from .services.openai_client import get_openai_client
+                client = get_openai_client()
+                responses = list(GraderResponse.objects.filter(session=selected_session))
+                questions = selected_session.get_question_sequence()
+                if not responses:
+                    messages.warning(request, "No grader responses to analyze.")
+                    return redirect("grader_moderator_dashboard")
+
+                # Compute average scores
+                scores_by_q = [[] for _ in questions]
+                comments_by_q = [[] for _ in questions]
+                for resp in responses:
+                    for i, q in enumerate(questions):
+                        try:
+                            score = int(resp.scores[i])
+                        except Exception:
+                            score = None
+                        if score is not None:
+                            scores_by_q[i].append(score)
+                        try:
+                            reason = str(resp.reasons[i]).strip()
+                        except Exception:
+                            reason = ""
+                        if reason:
+                            comments_by_q[i].append(reason)
+
+                averages = []
+                for lst in scores_by_q:
+                    if lst:
+                        averages.append(sum(lst) / len(lst))
+                    else:
+                        averages.append(None)
+
+                # Build prompts to summarize comments per question
+                summary_texts = []
+                for idx, q in enumerate(questions):
+                    concat = "\n\n".join(comments_by_q[idx])[:4000]
+                    system_prompt = f"You are summarizing grader feedback for a specific feature/question. Produce a concise markdown summary of the reasons provided by graders."
+                    user_prompt = f"Question: {q}\n\nResponses:\n{concat}\n\nProvide a short summary (3-6 sentences) capturing common themes and representative points."
+                    
+                    # Inject moderator's LLM instructions if provided
+                    if selected_session.user_instructions:
+                        user_prompt += f"\n\nModerator instructions: {selected_session.user_instructions}"
+                    
+                    messages_payload = [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ]
+                    try:
+                        completion = client.chat.completions.create(
+                            model=settings.OPENAI_MODEL_NAME,
+                            messages=messages_payload,
+                            temperature=0.6,
+                        )
+                        summary = completion.choices[0].message.content or ""
+                    except Exception as exc:
+                        summary = f"(LLM summary failed: {exc})"
+                    summary_texts.append(summary)
+
+                # Save analysis into session.moderator_summary (simple markdown)
+                md_lines = [f"# Analysis for {selected_session.topic}\n"]
+                for idx, q in enumerate(questions):
+                    avg = averages[idx]
+                    avg_str = f"{avg:.2f}" if avg is not None else "No scores"
+                    md_lines.append(f"## Question {idx+1}: {q}\n")
+                    md_lines.append(f"**Average score:** {avg_str}\n")
+                    md_lines.append(f"**Summary of reasons:**\n{summary_texts[idx]}\n")
+
+                selected_session.analysis_markdown = "\n".join(md_lines)
+                selected_session.save(update_fields=["analysis_markdown", "updated_at"])
+                messages.success(request, "Analysis complete. Summary available in the analysis panel.")
+                return redirect("grader_moderator_dashboard")
+
+    if "session_form" not in locals():
+        session_form = GraderSessionForm(instance=selected_session)
+
+    selection_initial = {"session_id": str(selected_session.pk) if selected_session else ""}
+    selection_form = GraderSessionSelectionForm(
+        request.POST if request.method == "POST" else None,
+        sessions=sessions,
+        initial=selection_initial,
+    )
+
+    context = {
+        "selection_form": selection_form,
+        "session_form": session_form,
+        "selected_session": selected_session,
+        "sessions": sessions,
+        "deliberation_mode": "grader",
+    }
+    return render(request, "core/grader_moderator_dashboard.html", context)
+
+
+def grader_user_view(request: HttpRequest, user_id: int) -> HttpResponse:
+    """User-facing grader page where a participant assigns scores and reasons."""
+    from .models import GraderSession, GraderResponse
+    from .forms import GraderResponseForm
+
+    session = GraderSession.get_active()
+    if not session:
+        messages.error(request, "No active grader session is available.")
+        return redirect("system_choice")
+
+    questions = session.get_question_sequence()
+
+    # Build a simple dynamic form on the fly
+    if request.method == "POST":
+        # Extract the scores and reasons
+        scores = []
+        reasons = []
+        for i in range(len(questions)):
+            s = request.POST.get(f"score_{i}")
+            try:
+                sv = int(s)
+            except Exception:
+                sv = None
+            scores.append(sv)
+            reasons.append(request.POST.get(f"reason_{i}", ""))
+
+        additional = request.POST.get("additional_comments", "")
+
+        # Save to DB (create or update if exists)
+        resp, _ = GraderResponse.objects.update_or_create(
+            session=session,
+            user_id=user_id,
+            defaults={
+                "scores": scores,
+                "reasons": reasons,
+                "additional_comments": additional,
+            },
+        )
+        messages.success(request, "Your grader responses have been saved. Thank you.")
+        return redirect("system_choice")
+
+    # Pre-fill if response exists
+    existing = GraderResponse.objects.filter(session=session, user_id=user_id).first()
+    initial_scores = existing.scores if existing else [None] * len(questions)
+    initial_reasons = existing.reasons if existing else [""] * len(questions)
+
+    # Build combined question data for template: (index, question, score, reason)
+    questions_data = []
+    for i, q in enumerate(questions):
+        questions_data.append((i, q, initial_scores[i] if i < len(initial_scores) else None, initial_reasons[i] if i < len(initial_reasons) else ""))
+
+    context = {
+        "session": session,
+        "questions_data": questions_data,
+        "additional": existing.additional_comments if existing else "",
+        "user_id": user_id,
+        "deliberation_mode": "grader",
+    }
+    return render(request, "core/grader_user_conversation.html", context)
+
+
 def ai_deliberation_results(request: HttpRequest, run_id: int) -> HttpResponse:
     """Display the results of an AI deliberation run."""
     from .models import AIDebateRun
@@ -708,4 +999,46 @@ def _get_or_create_default_ai_session() -> "AIDeliberationSession":
             topic="Default AI Deliberation",
         )
     return session
+
+
+def grader_export_csv(request: HttpRequest, session_id: int) -> HttpResponse:
+    """Export grader responses as CSV for a given session."""
+    from .models import GraderSession, GraderResponse
+
+    try:
+        session = GraderSession.objects.get(pk=session_id)
+    except GraderSession.DoesNotExist:
+        messages.error(request, "Grader session not found.")
+        return redirect("grader_moderator_dashboard")
+
+    questions = session.get_question_sequence()
+    responses = GraderResponse.objects.filter(session=session).order_by("user_id")
+
+    # Create CSV in memory
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Header row: User ID, then each question's score and reason columns
+    header = ["User ID"]
+    for i, q in enumerate(questions):
+        header.append(f"Q{i+1} Score")
+        header.append(f"Q{i+1} Reason")
+    header.append("Additional Comments")
+    writer.writerow(header)
+
+    # Data rows
+    for resp in responses:
+        row = [resp.user_id]
+        for i, q in enumerate(questions):
+            score = resp.scores[i] if i < len(resp.scores) else ""
+            reason = resp.reasons[i] if i < len(resp.reasons) else ""
+            row.append(score)
+            row.append(reason)
+        row.append(resp.additional_comments or "")
+        writer.writerow(row)
+
+    # Return as file download
+    response = HttpResponse(output.getvalue(), content_type="text/csv")
+    response["Content-Disposition"] = f"attachment; filename=grader_{session.s_id}_{session.pk}.csv"
+    return response
 

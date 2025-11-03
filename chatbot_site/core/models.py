@@ -279,3 +279,77 @@ class AIDebateSummary(models.Model):
     def __str__(self) -> str:
         return f"AIDebateSummary<session={self.session_id}>"
 
+
+class GraderSession(models.Model):
+    """Represents a grader-style session where participants assign numeric scores to objective questions."""
+
+    s_id = models.CharField(max_length=64, unique=True)
+    topic = models.CharField(max_length=255, blank=True)
+    description = models.TextField(blank=True, help_text="Detailed session description (rendered as markdown)")
+    # Ordered collection of objective questions for the grader
+    objective_questions = models.JSONField(default=list, blank=True)
+    # Optional knowledge base used for RAG when generating suggestions
+    knowledge_base = models.TextField(blank=True)
+    rag_chunk_count = models.PositiveIntegerField(default=0)
+    rag_last_built_at = models.DateTimeField(null=True, blank=True)
+    user_instructions = models.TextField(blank=True, help_text="Optional moderator-provided instructions for graders")
+    analysis_markdown = models.TextField(blank=True, help_text="LLM-generated analysis of collected grader feedback")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at", "-id")
+
+    def __str__(self) -> str:
+        return f"GraderSession<{self.s_id}>"
+
+    def get_question_sequence(self) -> list[str]:
+        questions = []
+        for entry in self.objective_questions or []:
+            if isinstance(entry, str):
+                candidate = entry.strip()
+            else:
+                candidate = str(entry).strip()
+            if candidate:
+                questions.append(candidate)
+        return questions
+
+    @classmethod
+    def get_active(cls) -> "GraderSession":
+        session = cls.objects.filter(is_active=True).order_by("-updated_at").first()
+        if session:
+            return session
+        return cls.objects.create(s_id="grader-default", topic="Default Grader Session", objective_questions=[])
+
+    def activate(self) -> None:
+        type(self).objects.exclude(pk=self.pk).update(is_active=False)
+        if not self.is_active:
+            self.is_active = True
+            self.save(update_fields=["is_active"]) 
+
+
+class GraderResponse(models.Model):
+    """Stores one participant's grader responses for a GraderSession.
+
+    - scores: list of integers (1-10) aligned with session objective_questions
+    - reasons: list of strings giving a reason for each score
+    - additional_comments: optional free-text from the participant
+    """
+
+    session = models.ForeignKey(GraderSession, on_delete=models.CASCADE, related_name="responses")
+    user_id = models.PositiveIntegerField()
+    scores = models.JSONField(default=list, blank=True)
+    reasons = models.JSONField(default=list, blank=True)
+    additional_comments = models.TextField(blank=True)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-submitted_at",)
+        constraints = [
+            models.UniqueConstraint(fields=("session", "user_id"), name="unique_grader_response_per_user"),
+        ]
+
+    def __str__(self) -> str:
+        return f"GraderResponse<session={self.session_id}, user={self.user_id}>"
+
