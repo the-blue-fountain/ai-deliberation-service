@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from django.contrib import messages
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -592,8 +592,8 @@ def ai_moderator_dashboard(request: HttpRequest) -> HttpResponse:
 
                 try:
                     service = AIDeliberationService(selected_session)
-                    run = service.run_deliberation()
-                    messages.success(request, "Deliberation completed.")
+                    run = service.start_deliberation(blocking=False)
+                    messages.success(request, "Deliberation started. This page will open the live transcript in a new tab.")
                     return redirect("ai_deliberation_results", run_id=run.pk)
                 except Exception as exc:
                     messages.error(request, f"Error running deliberation: {exc}")
@@ -938,6 +938,10 @@ def ai_deliberation_results(request: HttpRequest, run_id: int) -> HttpResponse:
             from .services.ai_deliberation_service import AIDeliberationService
 
             try:
+                if not run.completed:
+                    messages.warning(request, "Deliberation is still running. Please wait until the transcript is ready before generating a summary.")
+                    return redirect("ai_deliberation_results", run_id=run_id)
+
                 service = AIDeliberationService(session)
                 summary_text = service.generate_summary(run)
 
@@ -958,21 +962,49 @@ def ai_deliberation_results(request: HttpRequest, run_id: int) -> HttpResponse:
             except Exception as exc:
                 messages.error(request, f"Error generating summary: {exc}")
 
-    # Format transcript for display (grouped by question)
-    transcript_by_question = {}
+    # Format transcript for display in chat-like order per question
+    transcript_threads: list[dict[str, object]] = []
     if run.transcript:
+        thread_lookup: Dict[int, dict[str, object]] = {}
+        question_order: List[int] = []
+
         for turn in run.transcript:
-            q_idx = turn.get("question_index", 0)
-            q_text = turn.get("question", "")
-            if q_idx not in transcript_by_question:
-                transcript_by_question[q_idx] = {
-                    "question": q_text,
-                    "agents": [],
+            q_idx = int(turn.get("question_index", 0))
+            question_text = turn.get("question", "")
+
+            if q_idx not in thread_lookup:
+                thread_lookup[q_idx] = {
+                    "question_index": q_idx,
+                    "question": question_text,
+                    "messages": [],
                 }
-            transcript_by_question[q_idx]["agents"].append({
+                question_order.append(q_idx)
+
+            stage = turn.get("stage")
+            if not stage and "round" in turn:
+                round_value = turn.get("round")
+                if round_value == 1:
+                    stage = "initial"
+                elif round_value == 2:
+                    stage = "critique"
+
+            stage_label = None
+            if stage == "initial":
+                stage_label = "Initial Response"
+            elif stage == "critique":
+                stage_label = "Critique"
+
+            message = {
                 "persona": turn.get("persona", ""),
-                "opinion": turn.get("opinion", ""),
-            })
+                "content": turn.get("content") or turn.get("opinion", ""),
+                "stage": stage,
+                "stage_label": stage_label,
+                "peer_opinions": turn.get("peer_opinions", []),
+            }
+
+            thread_lookup[q_idx]["messages"].append(message)
+
+        transcript_threads = [thread_lookup[idx] for idx in question_order]
 
     # Get summary if it exists
     from .models import AIDebateSummary
@@ -982,7 +1014,7 @@ def ai_deliberation_results(request: HttpRequest, run_id: int) -> HttpResponse:
     context = {
         "session": session,
         "run": run,
-        "transcript_by_question": transcript_by_question,
+        "transcript_threads": transcript_threads,
         "summary": summary_obj,
     }
     return render(request, "core/ai_deliberation_results.html", context)

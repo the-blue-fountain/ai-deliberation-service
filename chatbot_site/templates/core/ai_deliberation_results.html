@@ -23,30 +23,49 @@
             {% endif %}
         </div>
 
-        {% if transcript_by_question %}
+        {% if not run.completed %}
+        <div class="card content-card p-4 mb-4">
+            <h3 class="fs-5 mb-3">Deliberation In Progress</h3>
+            <p class="mb-2">The AI agents are debating right now. This page will refresh automatically when results are ready.</p>
+            <div class="d-flex align-items-center gap-3 text-muted">
+                <div class="spinner-border text-primary" role="status" aria-hidden="true"></div>
+                <span>Collecting initial responses and critiques…</span>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if transcript_threads %}
         <div class="card content-card p-4 mb-4">
             <h3 class="fs-5 mb-4">Debate Transcript</h3>
             
-            {% for q_idx, question_data in transcript_by_question.items %}
+            {% for thread in transcript_threads %}
             <div class="mb-5">
                 <h4 class="fs-6 bg-light p-3 rounded mb-3">
-                    Question {{ q_idx|add:1 }}: {{ question_data.question }}
+                    Question {{ forloop.counter }}{% if thread.question %}: {{ thread.question }}{% endif %}
                 </h4>
-                
-                <div class="chat-container" style="max-height: 500px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 0.5rem; padding: 1rem;">
-                    {% for agent in question_data.agents %}
-                    <div class="mb-3 d-flex {% cycle 'flex-row' 'flex-row-reverse' %}">
-                        <div class="me-2">
-                            <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 40px; height: 40px; flex-shrink: 0;">
-                                <strong>{{ forloop.counter }}</strong>
-                            </div>
+
+                <div class="chat-container">
+                    {% for message in thread.messages %}
+                    <div class="chat-turn">
+                        <div class="chat-meta">
+                            {% if message.stage_label %}
+                                <span class="badge bg-secondary me-2">{{ message.stage_label }}</span>
+                            {% endif %}
+                            <strong>{{ message.persona }}</strong>
                         </div>
-                        <div class="flex-grow-1">
-                            <div class="bg-light p-3 rounded">
-                                <p class="mb-2"><strong>{{ agent.persona }}</strong></p>
-                                <p class="mb-0">{{ agent.opinion|linebreaks }}</p>
-                            </div>
+                        <div class="chat-bubble">
+                            {{ message.content|linebreaks }}
                         </div>
+                        {% if message.peer_opinions %}
+                        <details class="peer-context mt-2">
+                            <summary>Peer opinions shared with {{ message.persona }}</summary>
+                            <ul class="mb-0 ps-3">
+                                {% for peer in message.peer_opinions %}
+                                <li><strong>{{ peer.persona }}</strong>: {{ peer.opinion|linebreaksbr }}</li>
+                                {% endfor %}
+                            </ul>
+                        </details>
+                        {% endif %}
                     </div>
                     {% endfor %}
                 </div>
@@ -89,12 +108,56 @@
 <style>
     .chat-container {
         background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 0.5rem;
+        padding: 1.25rem;
     }
-    
+
+    .chat-turn + .chat-turn {
+        margin-top: 1.5rem;
+        border-top: 1px solid rgba(0, 0, 0, 0.05);
+        padding-top: 1.5rem;
+    }
+
+    .chat-meta {
+        display: flex;
+        align-items: center;
+        margin-bottom: 0.5rem;
+        gap: 0.5rem;
+    }
+
+    .chat-bubble {
+        background: #ffffff;
+        border-radius: 0.5rem;
+        padding: 0.75rem 1rem;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    }
+
+    .chat-bubble p:last-child {
+        margin-bottom: 0;
+    }
+
+    .peer-context summary {
+        cursor: pointer;
+        font-weight: 600;
+    }
+
+    .peer-context[open] summary {
+        color: #0d6efd;
+    }
+
     .markdown-box {
         white-space: pre-wrap;
         word-wrap: break-word;
     }
 </style>
+
+{% if not run.completed %}
+<script>
+    setTimeout(function () {
+        window.location.reload();
+    }, 4000);
+</script>
+{% endif %}
 {% endblock %}
 
