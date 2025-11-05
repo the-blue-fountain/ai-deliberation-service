@@ -1,0 +1,28 @@
+databases:
+  - name: ai-deliberation-db
+    plan: free
+    databaseName: ai_deliberation
+    user: ai_deliberation
+
+services:
+  - type: web
+    plan: free
+    name: ai-deliberation-service
+    runtime: python
+    buildCommand: './build.sh'
+    startCommand: 'cd chatbot_site && python -m gunicorn chatbot_site.asgi:application -k uvicorn.workers.UvicornWorker'
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-deliberation-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: WEB_CONCURRENCY
+        value: 4
+      - key: OPENAI_API_KEY
+        sync: false  # Set this manually in Render Dashboard
+      - key: OPENAI_MODEL_NAME
+        value: gpt-4o-mini
+      - key: OPENAI_EMBEDDING_MODEL
+        value: text-embedding-3-small

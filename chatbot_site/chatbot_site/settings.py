@@ -31,25 +31,32 @@ if env_file.exists():
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-# Read sensitive settings from environment for production (Render sets $PORT and env vars)
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-)ew(-bf+-p*xw=ag=_r)1dl@ds=!-uzq6+2-fkiscayovfccj=')
+# Render will automatically generate and set SECRET_KEY in production
+SECRET_KEY = os.environ.get('SECRET_KEY', default='django-insecure-)ew(-bf+-p*xw=ag=_r)1dl@ds=!-uzq6+2-fkiscayovfccj=')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('1', 'true', 'yes')
+# Set DEBUG to False if RENDER environment variable is present (production)
+DEBUG = 'RENDER' not in os.environ
 
-# Allow hosts from environment, but always include safe local defaults for development
+# Configure ALLOWED_HOSTS for Render and local development
+ALLOWED_HOSTS = []
+
+# Add Render external hostname if present (production)
+RENDER_EXTERNAL_HOSTNAME = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
+if RENDER_EXTERNAL_HOSTNAME:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
+
+# Add custom ALLOWED_HOSTS from environment variable (comma-separated)
 raw_allowed_hosts = os.environ.get('ALLOWED_HOSTS', '')
 if raw_allowed_hosts:
     parsed_hosts = [host.strip() for host in raw_allowed_hosts.split(',') if host.strip()]
-else:
-    parsed_hosts = []
+    ALLOWED_HOSTS.extend(parsed_hosts)
 
+# Always include safe local defaults for development
 default_dev_hosts = ['localhost', '127.0.0.1']
 for host in default_dev_hosts:
-    if host not in parsed_hosts:
-        parsed_hosts.append(host)
-
-ALLOWED_HOSTS = parsed_hosts
+    if host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(host)
 
 
 # Application definition
@@ -95,17 +102,26 @@ WSGI_APPLICATION = 'chatbot_site.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
-}
-
-# Use PostgreSQL from environment variable if provided (Neon/Render)
+# Use PostgreSQL from environment variable if provided (Render/production)
 DATABASE_URL = os.environ.get('DATABASE_URL')
 if DATABASE_URL:
-    DATABASES['default'] = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
+    # Configure for production with connection pooling
+    # Render requires SSL for PostgreSQL connections
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=DATABASE_URL,
+            conn_max_age=600,
+            ssl_require=True
+        )
+    }
+else:
+    # Fall back to SQLite for local development
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 # Password validation

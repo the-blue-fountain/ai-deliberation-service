@@ -222,42 +222,155 @@ To run DiscussChat on your computer, follow these steps:
 
 6. **Access the application**: Open your web browser and go to `http://localhost:8000/`. Use participant ID `0` for the moderator dashboard, or `1`, `2`, `3`, etc. for participants.
 
-## Creating an account on Render
+## Deploying to Render
 
-- Go to [Render](https://render.com/) and sign up for an account.
-![alt text](screenshots/create-account-render.png)
-- Once logged in, select "New Web Service".
-![alt text](screenshots/web-services.png)
-- We chose to get the project from GitHub to create the web service. Enter the repo url and click "Connect".
-![alt text](screenshots/create-web-service.png)
-- In the enxt screen, you will be asked to fill several boxes, and most will be pre-filled. You will have to set the start an dbuild commands as in the below screenshot:
-![alt text](screenshots/commands.png)
-- For the enviroment variables, you can simply select "Add from .env".
-![alt text](screenshots/env.png)
-- Paste the contents of your `.env` file and click "Add variables".
-![alt text](screenshots/env-add.png)
+### Quick Deploy with Blueprint
 
-That's it!
+This project includes a `render.yaml` blueprint for one-click deployment:
 
-## Environment Variables 
+1. **Fork or clone** this repository to your GitHub account
+2. Go to [Render Dashboard](https://dashboard.render.com/)
+3. Click **"New"** → **"Blueprint"**
+4. Connect your GitHub repository
+5. Render will automatically:
+   - Create a PostgreSQL database
+   - Deploy the web service
+   - Configure environment variables
+   - Run migrations
 
-### Django Configuration
-DJANGO_DEBUG=True (False for Production)
-DJANGO_SECRET_KEY=your-secret-key-here
-ALLOWED_HOSTS=localhost,127.0.0.1, your site domain for production
+### Manual Deployment Steps
 
-### Database Configuration (Neon PostgreSQL)
-DATABASE_URL=postgresql://user:password@host:port/dbname?sslmode=require&channel_binding=require (get from neon db)
+If you prefer manual setup:
 
-### OpenAI API Configuration
+#### 1. Create PostgreSQL Database
+
+- In Render Dashboard, click **"New"** → **"PostgreSQL"**
+- Choose a name (e.g., `ai-deliberation-db`)
+- Select the **Free** plan
+- Click **"Create Database"**
+- Save the **Internal Database URL** (you'll need this later)
+
+#### 2. Create Web Service
+
+- Click **"New"** → **"Web Service"**
+- Connect your GitHub repository
+- Configure the service:
+  - **Name**: `ai-deliberation-service`
+  - **Runtime**: `Python 3`
+  - **Build Command**: `./build.sh`
+  - **Start Command**: `cd chatbot_site && python -m gunicorn chatbot_site.asgi:application -k uvicorn.workers.UvicornWorker`
+
+#### 3. Configure Environment Variables
+
+Add these environment variables in Render Dashboard:
+
+**Required:**
+- `DATABASE_URL`: Use the Internal Database URL from step 1
+- `SECRET_KEY`: Click "Generate" to create a secure random value
+- `OPENAI_API_KEY`: Your OpenAI API key
+
+**Optional:**
+- `OPENAI_MODEL_NAME`: `gpt-4o-mini` (default)
+- `OPENAI_EMBEDDING_MODEL`: `text-embedding-3-small` (default)
+- `WEB_CONCURRENCY`: `4` (number of worker processes)
+
+**Important:** Render automatically sets `RENDER_EXTERNAL_HOSTNAME` - you don't need to configure this manually.
+
+#### 4. Deploy
+
+- Click **"Create Web Service"**
+- Render will automatically:
+  - Install dependencies
+  - Run database migrations
+  - Collect static files
+  - Start the application
+
+### Understanding Render Configuration
+
+The application is configured to work seamlessly with Render:
+
+**Debug Mode**: Automatically disabled when `RENDER` environment variable is present (set by Render automatically)
+
+**Allowed Hosts**: Automatically includes `RENDER_EXTERNAL_HOSTNAME` for your `*.onrender.com` domain
+
+**Database**: Configured with SSL required for PostgreSQL connections
+
+**Static Files**: Collected during build and served via WhiteNoise (if configured) or Render's CDN
+
+### Post-Deployment
+
+After deployment:
+
+1. Access your app at `https://your-service-name.onrender.com`
+2. Create discussion sessions via the moderator dashboard (participant ID: 0)
+3. Share participant links (participant IDs: 1, 2, 3, etc.)
+
+### Troubleshooting Render Deployment
+
+**Build Fails:**
+- Check that `build.sh` is executable (`chmod +x build.sh`)
+- Verify all dependencies are in `requirements.txt`
+- Check build logs in Render Dashboard
+
+**Application Won't Start:**
+- Verify `DATABASE_URL` is set correctly
+- Check that `SECRET_KEY` is configured
+- Review application logs in Render Dashboard
+
+**Database Connection Issues:**
+- Ensure you're using the **Internal Database URL** (not External)
+- Verify SSL is enabled in database settings
+- Check that database and web service are in the same region
+
+**Static Files Not Loading:**
+- Verify `STATIC_ROOT` is configured in settings
+- Check that `collectstatic` ran during build
+- Review static file paths in templates
+
+### Environment Variables Reference
+
+Render automatically provides these variables:
+- `RENDER`: Indicates running on Render (used to set DEBUG=False)
+- `RENDER_EXTERNAL_HOSTNAME`: Your app's hostname (e.g., `myapp.onrender.com`)
+- `PORT`: The port your app should listen on (handled by gunicorn)
+
+You must configure:
+- `DATABASE_URL`: PostgreSQL connection string
+- `SECRET_KEY`: Django secret key (use "Generate" button)
+- `OPENAI_API_KEY`: Your OpenAI API key
+
+## Environment Variables Reference
+
+### Local Development (.env.local)
+
+```env
+# OpenAI Configuration (Required)
 OPENAI_API_KEY=your-openai-api-key-here
-
-### CSRF Configuration (optional, for production deployment)
-DJANGO_CSRF_TRUSTED_ORIGINS=https://yourdomain.com (put your production site)
-
-### OpenAI Model Names
 OPENAI_MODEL_NAME=gpt-4o-mini
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+
+# Database (Optional - uses SQLite if not set)
+DATABASE_URL=postgresql://user:password@localhost:5432/dbname
+```
+
+### Production (Render)
+
+Render automatically provides:
+- `RENDER` - Indicates production environment (sets DEBUG=False)
+- `RENDER_EXTERNAL_HOSTNAME` - Your app's domain (automatically added to ALLOWED_HOSTS)
+- `PORT` - Application port (handled by gunicorn)
+
+You must configure in Render Dashboard:
+- `DATABASE_URL` - PostgreSQL connection string (from Render database)
+- `SECRET_KEY` - Django secret key (use "Generate" button)
+- `OPENAI_API_KEY` - Your OpenAI API key
+
+Optional production variables:
+- `OPENAI_MODEL_NAME` - Default: `gpt-4o-mini`
+- `OPENAI_EMBEDDING_MODEL` - Default: `text-embedding-3-small`
+- `WEB_CONCURRENCY` - Number of worker processes (default: 4)
+- `ALLOWED_HOSTS` - Additional comma-separated domains
+- `DJANGO_CSRF_TRUSTED_ORIGINS` - Trusted origins for CSRF (comma-separated)
 
 ## Supported OS
 
