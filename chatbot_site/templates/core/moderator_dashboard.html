@@ -68,10 +68,34 @@
                     {% for error in session_form.no_new_information_limit.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
 
+                {{ session_form.grader_objective_questions }}
+                <div class="mb-3" id="graderQuestionBuilder" data-session-id="{{ selected_session.pk|default:'' }}">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <label class="form-label mb-0">Grading Prompts (1-10 scale)</label>
+                        <button type="button" class="btn btn-sm btn-outline-info" id="generateGraderQuestionsBtn">Generate Suggestions</button>
+                    </div>
+                    <p class="form-text">These prompts are shown after the live discussion. Participants assign each one a score from 1 (poor) to 10 (excellent) and explain their reasoning.</p>
+                    <div id="graderQuestionList" class="list-group mb-3"></div>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="manualGraderQuestionInput" placeholder="Type a grading prompt and click Add">
+                        <button type="button" class="btn btn-outline-primary" id="addManualGraderQuestionBtn">Add</button>
+                    </div>
+                    <div class="form-text mt-2">Keep prompts neutral and specific so graders can judge the discussion outcomes consistently.</div>
+                    {% for error in session_form.grader_objective_questions.errors %}
+                        <div class="text-danger small mt-2">{{ error }}</div>
+                    {% endfor %}
+                </div>
+
+                <div id="generatedGraderQuestions" class="mb-3 d-none">
+                    <label class="form-label">AI Suggestions for Grading Prompts</label>
+                    <div id="graderSuggestionsList" class="list-group"></div>
+                    <div class="form-text mt-2">Click "Add" on any suggestion to include it in your grading prompt list.</div>
+                </div>
+
                 {{ session_form.objective_questions }}
                 <div class="mb-3" id="questionBuilder" data-session-id="{{ selected_session.pk|default:'' }}">
                     <div class="d-flex justify-content-between align-items-center mb-2">
-                        <label class="form-label mb-0">Objective Questions</label>
+                        <label class="form-label mb-0">Discussion Questions</label>
                         <button type="button" class="btn btn-sm btn-outline-info" id="generateQuestionsBtn">Generate Suggestions</button>
                     </div>
                     <p class="form-text">Questions are asked in the order shown below. Reorder or remove them to shape the discussion flow.</p>
@@ -246,6 +270,11 @@
                         <div class="markdown-box">{{ selected_session.moderator_summary }}</div>
                     {% endif %}
                 {% endwith %}
+                {% if selected_session.grader_objective_questions %}
+                    <div class="mt-3">
+                        <a href="{% url 'discussion_grader_export' selected_session.pk %}" class="btn btn-sm btn-outline-warning">Download Grader CSV</a>
+                    </div>
+                {% endif %}
             {% else %}
                 <p class="text-muted mb-0">Run an analysis to populate the summary.</p>
             {% endif %}
@@ -298,30 +327,29 @@ document.addEventListener('DOMContentLoaded', function() {
     const newSessionForm = document.getElementById('newSessionForm');
     const newSessionModal = document.getElementById('newSessionModal');
     const formErrors = document.getElementById('sessionFormErrors');
-    
+
     if (newSessionForm) {
         newSessionForm.addEventListener('submit', async function(e) {
             e.preventDefault();
-            
+
             const sessionId = document.getElementById('id_session_id_modal').value.trim();
             const topic = document.getElementById('id_topic_modal').value.trim();
             const csrfToken = document.querySelector('[name="csrfmiddlewaretoken"]').value;
-            
-            // Validation
+
             if (!sessionId) {
                 formErrors.textContent = 'Session ID is required.';
                 formErrors.classList.remove('d-none');
                 return;
             }
-            
+
             if (!topic) {
                 formErrors.textContent = 'Topic is required.';
                 formErrors.classList.remove('d-none');
                 return;
             }
-            
+
             formErrors.classList.add('d-none');
-            
+
             try {
                 const response = await fetch('{% url "create_new_session_api" %}', {
                     method: 'POST',
@@ -334,15 +362,12 @@ document.addEventListener('DOMContentLoaded', function() {
                         topic: topic,
                     }),
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (data.success) {
-                    // Close modal
                     const modal = bootstrap.Modal.getInstance(newSessionModal);
                     modal.hide();
-                    
-                    // Reload page to show new session
                     window.location.href = `{% url "moderator_dashboard" %}?session_id=${data.session_id}`;
                 } else {
                     formErrors.textContent = data.error || 'An error occurred while creating the session.';
@@ -358,196 +383,234 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    const hiddenField = document.getElementById('id_objective_questions');
-    const listEl = document.getElementById('questionList');
-    const addBtn = document.getElementById('addManualQuestionBtn');
-    const inputEl = document.getElementById('manualQuestionInput');
-    const generateBtn = document.getElementById('generateQuestionsBtn');
-    const suggestionsContainer = document.getElementById('generatedQuestions');
-    const suggestionsList = document.getElementById('suggestionsList');
-    const builderEl = document.getElementById('questionBuilder');
-    const knowledgeField = document.getElementById('id_knowledge_base');
     const topicField = document.getElementById('id_topic');
+    const knowledgeField = document.getElementById('id_knowledge_base');
 
-    let questions = [];
+    const createQuestionBuilder = (config) => {
+        const hiddenField = document.getElementById(config.hiddenFieldId);
+        const listEl = document.getElementById(config.listId);
+        const addBtn = document.getElementById(config.addBtnId);
+        const inputEl = document.getElementById(config.inputId);
+        const generateBtn = config.generateBtnId ? document.getElementById(config.generateBtnId) : null;
+        const suggestionsContainer = config.suggestionsContainerId ? document.getElementById(config.suggestionsContainerId) : null;
+        const suggestionsList = config.suggestionsListId ? document.getElementById(config.suggestionsListId) : null;
+        const builderEl = document.getElementById(config.builderId);
 
-    const syncHiddenField = () => {
-        if (hiddenField) {
-            hiddenField.value = JSON.stringify(questions);
-        }
-    };
-
-    const renderQuestions = () => {
-        if (!listEl) return;
-        syncHiddenField();
-        listEl.innerHTML = '';
-        if (!questions.length) {
-            const emptyState = document.createElement('div');
-            emptyState.className = 'list-group-item text-muted';
-            emptyState.textContent = 'No questions configured yet.';
-            listEl.appendChild(emptyState);
+        if (!hiddenField || !listEl || !builderEl) {
             return;
         }
 
-        questions.forEach((text, index) => {
-            const item = document.createElement('div');
-            item.className = 'list-group-item d-flex align-items-start justify-content-between gap-2';
+        const state = { questions: [] };
 
-            const label = document.createElement('div');
-            label.className = 'flex-grow-1';
-            label.textContent = `${index + 1}. ${text}`;
-            item.appendChild(label);
+        const syncHiddenField = () => {
+            hiddenField.value = JSON.stringify(state.questions);
+        };
 
-            const controls = document.createElement('div');
-            controls.className = 'btn-group btn-group-sm';
+        const renderQuestions = () => {
+            syncHiddenField();
+            listEl.innerHTML = '';
 
-            const upBtn = document.createElement('button');
-            upBtn.type = 'button';
-            upBtn.className = 'btn btn-outline-secondary';
-            upBtn.innerText = 'Up';
-            upBtn.disabled = index === 0;
-            upBtn.addEventListener('click', () => {
-                if (index === 0) return;
-                const target = questions.splice(index, 1)[0];
-                questions.splice(index - 1, 0, target);
-                renderQuestions();
-            });
-
-            const downBtn = document.createElement('button');
-            downBtn.type = 'button';
-            downBtn.className = 'btn btn-outline-secondary';
-            downBtn.innerText = 'Down';
-            downBtn.disabled = index === questions.length - 1;
-            downBtn.addEventListener('click', () => {
-                if (index === questions.length - 1) return;
-                const target = questions.splice(index, 1)[0];
-                questions.splice(index + 1, 0, target);
-                renderQuestions();
-            });
-
-            const removeBtn = document.createElement('button');
-            removeBtn.type = 'button';
-            removeBtn.className = 'btn btn-outline-danger';
-            removeBtn.innerText = 'Remove';
-            removeBtn.addEventListener('click', () => {
-                questions.splice(index, 1);
-                renderQuestions();
-            });
-
-            controls.appendChild(upBtn);
-            controls.appendChild(downBtn);
-            controls.appendChild(removeBtn);
-            item.appendChild(controls);
-
-            listEl.appendChild(item);
-        });
-    };
-
-    const addQuestion = (text) => {
-        const trimmed = (text || '').trim();
-        if (!trimmed) return;
-        questions.push(trimmed);
-        renderQuestions();
-    };
-
-    const hydrateQuestions = () => {
-        if (!hiddenField) return;
-        try {
-            const initial = hiddenField.value ? JSON.parse(hiddenField.value) : [];
-            if (Array.isArray(initial)) {
-                questions = initial.map(entry => String(entry).trim()).filter(Boolean);
-            }
-        } catch (err) {
-            questions = [];
-        }
-        renderQuestions();
-    };
-
-    hydrateQuestions();
-
-    if (addBtn && inputEl) {
-        addBtn.addEventListener('click', () => {
-            addQuestion(inputEl.value);
-            inputEl.value = '';
-            inputEl.focus();
-        });
-        inputEl.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                addBtn.click();
-            }
-        });
-    }
-
-    if (generateBtn) {
-        generateBtn.addEventListener('click', async (event) => {
-            event.preventDefault();
-            const topic = topicField ? topicField.value.trim() : '';
-            if (!topic) {
-                alert('Please enter a topic before generating questions.');
+            if (!state.questions.length) {
+                const emptyState = document.createElement('div');
+                emptyState.className = 'list-group-item text-muted';
+                emptyState.textContent = 'No questions configured yet.';
+                listEl.appendChild(emptyState);
                 return;
             }
 
-            generateBtn.disabled = true;
-            generateBtn.textContent = 'Generating...';
-            try {
-                const csrfToken = document.querySelector('[name="csrfmiddlewaretoken"]').value;
-                const payload = { topic, current_questions: questions };
-                if (builderEl && builderEl.dataset.sessionId) {
-                    payload.session_id = builderEl.dataset.sessionId;
-                }
-                if (knowledgeField) {
-                    payload.knowledge_base = knowledgeField.value || '';
-                }
-                const response = await fetch('{% url "generate_questions_api" %}', {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRFToken': csrfToken,
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(payload),
+            state.questions.forEach((text, index) => {
+                const item = document.createElement('div');
+                item.className = 'list-group-item d-flex align-items-start justify-content-between gap-2';
+
+                const label = document.createElement('div');
+                label.className = 'flex-grow-1';
+                label.textContent = `${index + 1}. ${text}`;
+                item.appendChild(label);
+
+                const controls = document.createElement('div');
+                controls.className = 'btn-group btn-group-sm';
+
+                const upBtn = document.createElement('button');
+                upBtn.type = 'button';
+                upBtn.className = 'btn btn-outline-secondary';
+                upBtn.innerText = 'Up';
+                upBtn.disabled = index === 0;
+                upBtn.addEventListener('click', () => {
+                    if (index === 0) return;
+                    const target = state.questions.splice(index, 1)[0];
+                    state.questions.splice(index - 1, 0, target);
+                    renderQuestions();
                 });
-                const data = await response.json();
-                if (!data.success) {
-                    throw new Error(data.error || 'Failed to generate suggestions.');
-                }
 
-                const suggestions = Array.isArray(data.questions) ? data.questions : [];
-                suggestionsList.innerHTML = '';
-                if (!suggestions.length) {
-                    const empty = document.createElement('div');
-                    empty.className = 'list-group-item text-muted';
-                    empty.textContent = 'No suggestions returned.';
-                    suggestionsList.appendChild(empty);
-                } else {
-                    suggestions.forEach((suggestion) => {
-                        const item = document.createElement('div');
-                        item.className = 'list-group-item d-flex justify-content-between align-items-center gap-2';
+                const downBtn = document.createElement('button');
+                downBtn.type = 'button';
+                downBtn.className = 'btn btn-outline-secondary';
+                downBtn.innerText = 'Down';
+                downBtn.disabled = index === state.questions.length - 1;
+                downBtn.addEventListener('click', () => {
+                    if (index === state.questions.length - 1) return;
+                    const target = state.questions.splice(index, 1)[0];
+                    state.questions.splice(index + 1, 0, target);
+                    renderQuestions();
+                });
 
-                        const textNode = document.createElement('div');
-                        textNode.className = 'flex-grow-1';
-                        textNode.textContent = suggestion;
+                const removeBtn = document.createElement('button');
+                removeBtn.type = 'button';
+                removeBtn.className = 'btn btn-outline-danger';
+                removeBtn.innerText = 'Remove';
+                removeBtn.addEventListener('click', () => {
+                    state.questions.splice(index, 1);
+                    renderQuestions();
+                });
 
-                        const addSuggestionBtn = document.createElement('button');
-                        addSuggestionBtn.type = 'button';
-                        addSuggestionBtn.className = 'btn btn-sm btn-outline-primary';
-                        addSuggestionBtn.textContent = 'Add';
-                        addSuggestionBtn.addEventListener('click', () => addQuestion(suggestion));
+                controls.appendChild(upBtn);
+                controls.appendChild(downBtn);
+                controls.appendChild(removeBtn);
+                item.appendChild(controls);
 
-                        item.appendChild(textNode);
-                        item.appendChild(addSuggestionBtn);
-                        suggestionsList.appendChild(item);
-                    });
-                }
-                suggestionsContainer.classList.remove('d-none');
-            } catch (error) {
-                alert('Error generating questions: ' + error.message);
-            } finally {
-                generateBtn.disabled = false;
-                generateBtn.textContent = 'Generate Suggestions';
+                listEl.appendChild(item);
+            });
+        };
+
+        const addQuestion = (text) => {
+            const trimmed = (text || '').trim();
+            if (!trimmed) {
+                return;
             }
-        });
-    }
+            state.questions.push(trimmed);
+            renderQuestions();
+        };
+
+        const hydrateQuestions = () => {
+            try {
+                const initial = hiddenField.value ? JSON.parse(hiddenField.value) : [];
+                if (Array.isArray(initial)) {
+                    state.questions = initial.map(entry => String(entry).trim()).filter(Boolean);
+                }
+            } catch (err) {
+                state.questions = [];
+            }
+            renderQuestions();
+        };
+
+        hydrateQuestions();
+
+        if (addBtn && inputEl) {
+            addBtn.addEventListener('click', () => {
+                addQuestion(inputEl.value);
+                inputEl.value = '';
+                inputEl.focus();
+            });
+            inputEl.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    addBtn.click();
+                }
+            });
+        }
+
+        if (generateBtn && suggestionsContainer && suggestionsList) {
+            if (!generateBtn.dataset.defaultLabel) {
+                generateBtn.dataset.defaultLabel = generateBtn.textContent || 'Generate Suggestions';
+            }
+
+            generateBtn.addEventListener('click', async (event) => {
+                event.preventDefault();
+                const topic = topicField ? topicField.value.trim() : '';
+                if (!topic) {
+                    window.alert('Please enter a topic before generating questions.');
+                    return;
+                }
+
+                generateBtn.disabled = true;
+                generateBtn.textContent = 'Generating...';
+                try {
+                    const csrfToken = document.querySelector('[name="csrfmiddlewaretoken"]').value;
+                    const payload = {
+                        topic,
+                        current_questions: state.questions,
+                        question_type: config.questionType || 'discussion',
+                    };
+                    if (builderEl && builderEl.dataset.sessionId) {
+                        payload.session_id = builderEl.dataset.sessionId;
+                    }
+                    if (knowledgeField) {
+                        payload.knowledge_base = knowledgeField.value || '';
+                    }
+                    const response = await fetch('{% url "generate_questions_api" %}', {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRFToken': csrfToken,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(payload),
+                    });
+                    const data = await response.json();
+                    if (!data.success) {
+                        throw new Error(data.error || 'Failed to generate suggestions.');
+                    }
+
+                    const suggestions = Array.isArray(data.questions) ? data.questions : [];
+                    suggestionsList.innerHTML = '';
+                    if (!suggestions.length) {
+                        const empty = document.createElement('div');
+                        empty.className = 'list-group-item text-muted';
+                        empty.textContent = 'No suggestions returned.';
+                        suggestionsList.appendChild(empty);
+                    } else {
+                        suggestions.forEach((suggestion) => {
+                            const item = document.createElement('div');
+                            item.className = 'list-group-item d-flex justify-content-between align-items-center gap-2';
+
+                            const textNode = document.createElement('div');
+                            textNode.className = 'flex-grow-1';
+                            textNode.textContent = suggestion;
+
+                            const addSuggestionBtn = document.createElement('button');
+                            addSuggestionBtn.type = 'button';
+                            addSuggestionBtn.className = 'btn btn-sm btn-outline-primary';
+                            addSuggestionBtn.textContent = 'Add';
+                            addSuggestionBtn.addEventListener('click', () => addQuestion(suggestion));
+
+                            item.appendChild(textNode);
+                            item.appendChild(addSuggestionBtn);
+                            suggestionsList.appendChild(item);
+                        });
+                    }
+                    suggestionsContainer.classList.remove('d-none');
+                } catch (error) {
+                    window.alert('Error generating questions: ' + error.message);
+                } finally {
+                    generateBtn.disabled = false;
+                    generateBtn.textContent = generateBtn.dataset.defaultLabel || 'Generate Suggestions';
+                }
+            });
+        }
+    };
+
+    createQuestionBuilder({
+        hiddenFieldId: 'id_objective_questions',
+        listId: 'questionList',
+        addBtnId: 'addManualQuestionBtn',
+        inputId: 'manualQuestionInput',
+        generateBtnId: 'generateQuestionsBtn',
+        suggestionsContainerId: 'generatedQuestions',
+        suggestionsListId: 'suggestionsList',
+        builderId: 'questionBuilder',
+        questionType: 'discussion',
+    });
+
+    createQuestionBuilder({
+        hiddenFieldId: 'id_grader_objective_questions',
+        listId: 'graderQuestionList',
+        addBtnId: 'addManualGraderQuestionBtn',
+        inputId: 'manualGraderQuestionInput',
+        generateBtnId: 'generateGraderQuestionsBtn',
+        suggestionsContainerId: 'generatedGraderQuestions',
+        suggestionsListId: 'graderSuggestionsList',
+        builderId: 'graderQuestionBuilder',
+        questionType: 'grader',
+    });
 });
 </script>
 {% endblock %}

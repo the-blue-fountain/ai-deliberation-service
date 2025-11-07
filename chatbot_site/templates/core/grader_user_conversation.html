@@ -39,7 +39,11 @@
 
                 <div class="d-flex justify-content-end gap-2">
                     <button type="submit" class="btn btn-primary">Submit Scores</button>
-                    <a href="{% url 'system_choice' %}" class="btn btn-outline-secondary">Cancel</a>
+                    {% if next_url %}
+                        <a href="{% url next_url user_id %}" class="btn btn-outline-secondary">Go to Discussion</a>
+                    {% else %}
+                        <a href="{% url 'system_choice' %}" class="btn btn-outline-secondary">Cancel</a>
+                    {% endif %}
                 </div>
             </form>
         </div>

@@ -14,7 +14,7 @@ from .forms import (
     SessionSelectionForm,
     UserMessageForm,
 )
-from .models import DiscussionSession, UserConversation
+from .models import DiscussionSession, UserConversation, DiscussionGraderResponse
 from .services.conversation_service import (
     ModeratorAnalysisService,
     UserConversationService,
@@ -84,6 +84,10 @@ def generate_questions_api(request: HttpRequest) -> JsonResponse:
     if not topic:
         return JsonResponse({"success": False, "error": "Topic is required"}, status=400)
 
+    question_type_raw = (data.get("question_type") or "discussion").lower()
+    question_type = question_type_raw.strip()
+    is_grader_mode = question_type in {"grader", "grading", "score", "scoring"}
+
     try:
         session_obj: Optional[DiscussionSession] = None
         session_id_value = data.get("session_id")
@@ -120,20 +124,35 @@ def generate_questions_api(request: HttpRequest) -> JsonResponse:
             rag_context_chunks.append(snippet)
 
         client = get_openai_client()
-        system = (
-            "You are a helpful assistant that creates short, objective, neutral discussion questions. "
-            "Given a topic and optional background excerpts, produce exactly four concise objective questions suitable for asking participants. "
-            "Avoid reusing any questions that the moderator already selected. "
-            "Return ONLY a JSON object with a 'questions' key containing an array of 4 question strings. "
-            "Example format: {\"questions\": [\"question 1\", \"question 2\", \"question 3\", \"question 4\"]}"
-        )
+        if is_grader_mode:
+            system = (
+                "You are a helpful assistant that drafts objective grading prompts. "
+                "Given a topic and optional background excerpts, produce exactly four concise prompts that ask participants to assign a score from 1 (poor) to 10 (excellent) and provide a short explanation. "
+                "Avoid reusing any prompts that the moderator already selected. "
+                "Each prompt must clearly describe what the grader is evaluating while remaining neutral and factual. "
+                "Return ONLY a JSON object with a 'questions' key containing an array of 4 prompt strings. "
+                "Example format: {\"questions\": [\"Rate how clearly the participant explained...\", ...]}"
+            )
+        else:
+            system = (
+                "You are a helpful assistant that creates short, objective, neutral discussion questions. "
+                "Given a topic and optional background excerpts, produce exactly four concise objective questions suitable for asking participants. "
+                "Avoid reusing any questions that the moderator already selected. "
+                "Return ONLY a JSON object with a 'questions' key containing an array of 4 question strings. "
+                "Example format: {\"questions\": [\"question 1\", \"question 2\", \"question 3\", \"question 4\"]}"
+            )
         user_sections = [f"Topic: {topic}"]
         if existing_questions:
             existing_block = "\n".join(f"- {question}" for question in existing_questions)
             user_sections.append("Existing questions to avoid repeating:\n" + existing_block)
         if rag_context_chunks:
             user_sections.append("Relevant background excerpts:\n" + "\n".join(rag_context_chunks))
-        user_sections.append("Generate 4 short objective questions.")
+        if is_grader_mode:
+            user_sections.append(
+                "Generate 4 grading prompts. Each prompt should direct the grader to score the participant's performance on a 1-10 scale and explain their reasoning."
+            )
+        else:
+            user_sections.append("Generate 4 short objective questions.")
         user = "\n\n".join(user_sections)
         completion = client.chat.completions.create(
             model=settings.OPENAI_MODEL_NAME,
@@ -172,6 +191,13 @@ def entry_point(request: HttpRequest) -> HttpResponse:
             participant_id = form.cleaned_data["participant_id"]
             if participant_id == 0:
                 return redirect("moderator_dashboard")
+            if session and session.get_grader_question_sequence():
+                has_grader_response = DiscussionGraderResponse.objects.filter(
+                    session=session,
+                    user_id=participant_id,
+                ).exists()
+                if not has_grader_response:
+                    return redirect("discussion_grader_user", user_id=participant_id)
             return redirect("user_conversation", user_id=participant_id)
     else:
         form = ParticipantIdForm()
@@ -341,6 +367,10 @@ def moderator_dashboard(request: HttpRequest) -> HttpResponse:
 
 def user_conversation(request: HttpRequest, user_id: int) -> HttpResponse:
     session = DiscussionSession.get_active()
+    if session and session.get_grader_question_sequence():
+        if not DiscussionGraderResponse.objects.filter(session=session, user_id=user_id).exists():
+            messages.info(request, "Please complete the grader prompts before starting the discussion.")
+            return redirect("discussion_grader_user", user_id=user_id)
     conversation, _ = UserConversation.objects.get_or_create(session=session, user_id=user_id)
 
     # Determine the current question context for this participant
@@ -1073,4 +1103,99 @@ def grader_export_csv(request: HttpRequest, session_id: int) -> HttpResponse:
     response = HttpResponse(output.getvalue(), content_type="text/csv")
     response["Content-Disposition"] = f"attachment; filename=grader_{session.s_id}_{session.pk}.csv"
     return response
+
+
+def discussion_grader_export_csv(request: HttpRequest, session_id: int) -> HttpResponse:
+    """Export integrated grader responses (for DiscussionSession) as CSV."""
+    from .models import DiscussionSession, DiscussionGraderResponse
+
+    try:
+        session = DiscussionSession.objects.get(pk=session_id)
+    except DiscussionSession.DoesNotExist:
+        messages.error(request, "Discussion session not found.")
+        return redirect("moderator_dashboard")
+
+    questions = session.get_grader_question_sequence()
+    responses = DiscussionGraderResponse.objects.filter(session=session).order_by("user_id")
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    header = ["User ID"]
+    for i, q in enumerate(questions):
+        header.append(f"Q{i+1} Score")
+        header.append(f"Q{i+1} Reason")
+    header.append("Additional Comments")
+    writer.writerow(header)
+
+    for resp in responses:
+        row = [resp.user_id]
+        for i, q in enumerate(questions):
+            score = resp.scores[i] if i < len(resp.scores) else ""
+            reason = resp.reasons[i] if i < len(resp.reasons) else ""
+            row.append(score)
+            row.append(reason)
+        row.append(resp.additional_comments or "")
+        writer.writerow(row)
+
+    response = HttpResponse(output.getvalue(), content_type="text/csv")
+    response["Content-Disposition"] = f"attachment; filename=discussion_grader_{session.s_id}_{session.pk}.csv"
+    return response
+
+
+def discussion_grader_user_view(request: HttpRequest, user_id: int) -> HttpResponse:
+    """Participant-facing grader form integrated into a DiscussionSession."""
+    from .models import DiscussionSession, DiscussionGraderResponse
+
+    session = DiscussionSession.get_active()
+    if not session:
+        messages.error(request, "No active discussion session is available.")
+        return redirect("system_choice")
+
+    questions = session.get_grader_question_sequence()
+
+    if request.method == "POST":
+        # Extract scores and reasons
+        scores = []
+        reasons = []
+        for i in range(len(questions)):
+            s = request.POST.get(f"score_{i}")
+            try:
+                sv = int(s)
+            except Exception:
+                sv = None
+            scores.append(sv)
+            reasons.append(request.POST.get(f"reason_{i}", ""))
+
+        additional = request.POST.get("additional_comments", "")
+
+        resp, _ = DiscussionGraderResponse.objects.update_or_create(
+            session=session,
+            user_id=user_id,
+            defaults={
+                "scores": scores,
+                "reasons": reasons,
+                "additional_comments": additional,
+            },
+        )
+        messages.success(request, "Your grader responses have been saved. Thank you.")
+        return redirect("user_conversation", user_id=user_id)
+
+    # Pre-fill if response exists
+    existing = DiscussionGraderResponse.objects.filter(session=session, user_id=user_id).first()
+    initial_scores = existing.scores if existing else [None] * len(questions)
+    initial_reasons = existing.reasons if existing else [""] * len(questions)
+
+    questions_data = []
+    for i, q in enumerate(questions):
+        questions_data.append((i, q, initial_scores[i] if i < len(initial_scores) else None, initial_reasons[i] if i < len(initial_reasons) else ""))
+
+    context = {
+        "session": session,
+        "questions_data": questions_data,
+        "additional": existing.additional_comments if existing else "",
+        "user_id": user_id,
+        "next_url": "user_conversation",
+    }
+    return render(request, "core/grader_user_conversation.html", context)
 

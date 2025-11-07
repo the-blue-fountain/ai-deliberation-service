@@ -22,5 +22,8 @@ urlpatterns = [
     path('grader/moderator/', views.grader_moderator_dashboard, name='grader_moderator_dashboard'),
     path('grader/user/<int:user_id>/', views.grader_user_view, name='grader_user'),
     path('grader/export/<int:session_id>/', views.grader_export_csv, name='grader_export'),
+    # Integrated grader for DiscussionSession
+    path('human/grader/user/<int:user_id>/', views.discussion_grader_user_view, name='discussion_grader_user'),
+    path('human/grader/export/<int:session_id>/', views.discussion_grader_export_csv, name='discussion_grader_export'),
 ]
 

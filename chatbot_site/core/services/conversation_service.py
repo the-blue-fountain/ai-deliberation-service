@@ -12,6 +12,7 @@ from django.utils import timezone
 from .openai_client import get_openai_client
 from .rag_service import RagService
 from ..models import DiscussionSession, UserConversation
+from ..models import DiscussionGraderResponse
 
 # Import prompts from the centralized prompts package
 _chatbot_root = Path(__file__).resolve().parent.parent.parent.parent
@@ -419,6 +420,20 @@ class ModeratorAnalysisService:
                 "user_id": str(conversation.user_id),
                 "content": conversation.views_markdown,
             })
+        # Also include integrated grader responses (if any) so the moderator sees both perspectives
+        grader_entries: List[Dict[str, str]] = []
+        try:
+            for resp in self.session.grader_responses.all():
+                grader_entries.append({
+                    "user_id": str(resp.user_id),
+                    "scores": resp.scores,
+                    "reasons": resp.reasons,
+                    "additional_comments": resp.additional_comments,
+                })
+        except Exception:
+            grader_entries = []
+        if grader_entries:
+            views.append({"grader_responses": grader_entries})
         return views
 
     def _stringify_payload_field(self, value: object) -> str:

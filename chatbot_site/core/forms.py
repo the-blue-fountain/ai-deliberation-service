@@ -15,6 +15,10 @@ class DiscussionSessionForm(forms.ModelForm):
         widget=forms.HiddenInput(),
         required=False,
     )
+    grader_objective_questions = forms.CharField(
+        widget=forms.HiddenInput(),
+        required=False,
+    )
     question_followup_limit = forms.IntegerField(
         min_value=1,
         initial=3,
@@ -37,6 +41,7 @@ class DiscussionSessionForm(forms.ModelForm):
             "question_followup_limit",
             "no_new_information_limit",
             "objective_questions",
+            "grader_objective_questions",
             "knowledge_base",
             "user_system_prompt",
             "moderator_system_prompt",
@@ -70,10 +75,16 @@ class DiscussionSessionForm(forms.ModelForm):
         if not sequence:
             sequence = []
         self.fields["objective_questions"].initial = json.dumps(sequence)
+        # grader questions
+        grader_sequence = []
+        if self.instance and getattr(self.instance, "pk", None):
+            grader_sequence = self.instance.get_grader_question_sequence()
+        self.fields["grader_objective_questions"].initial = json.dumps(grader_sequence)
 
     def save(self, commit=True):
         instance = super().save(commit=False)
         instance.objective_questions = self.cleaned_data.get("objective_questions", [])
+        instance.grader_objective_questions = self.cleaned_data.get("grader_objective_questions", [])
         instance.question_followup_limit = self.cleaned_data.get("question_followup_limit")
         instance.no_new_information_limit = self.cleaned_data.get("no_new_information_limit")
         if commit:
@@ -90,6 +101,24 @@ class DiscussionSessionForm(forms.ModelForm):
             raise forms.ValidationError("Unable to decode question list.") from exc
         if not isinstance(parsed, list):
             raise forms.ValidationError("Question list must be an array of strings.")
+
+        cleaned: list[str] = []
+        for entry in parsed:
+            text = str(entry).strip()
+            if text:
+                cleaned.append(text)
+        return cleaned
+
+    def clean_grader_objective_questions(self):
+        raw = self.cleaned_data.get("grader_objective_questions")
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise forms.ValidationError("Unable to decode grader question list.") from exc
+        if not isinstance(parsed, list):
+            raise forms.ValidationError("Grader question list must be an array of strings.")
 
         cleaned: list[str] = []
         for entry in parsed:

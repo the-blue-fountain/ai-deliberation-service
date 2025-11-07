@@ -44,6 +44,7 @@ class DiscussionSession(models.Model):
         blank=True,
         help_text="Optional moderator-provided instructions for participants",
     )
+    grader_objective_questions = models.JSONField(default=list, blank=True)
     knowledge_base = models.TextField(blank=True)
     rag_chunk_count = models.PositiveIntegerField(default=0)
     rag_last_built_at = models.DateTimeField(null=True, blank=True)
@@ -74,6 +75,19 @@ class DiscussionSession(models.Model):
 
         questions = []
         for entry in self.objective_questions or []:
+            if isinstance(entry, str):
+                candidate = entry.strip()
+            else:
+                candidate = str(entry).strip()
+            if candidate:
+                questions.append(candidate)
+        return questions
+
+    def get_grader_question_sequence(self) -> list[str]:
+        """Return the ordered list of grader questions for this session."""
+
+        questions: list[str] = []
+        for entry in self.grader_objective_questions or []:
             if isinstance(entry, str):
                 candidate = entry.strip()
             else:
@@ -352,4 +366,29 @@ class GraderResponse(models.Model):
 
     def __str__(self) -> str:
         return f"GraderResponse<session={self.session_id}, user={self.user_id}>"
+
+
+class DiscussionGraderResponse(models.Model):
+    """Stores one participant's grader responses collected as part of a DiscussionSession.
+
+    - scores: list of integers aligned with DiscussionSession.grader_objective_questions
+    - reasons: list of strings giving a reason for each score
+    - additional_comments: optional free-text from the participant
+    """
+
+    session = models.ForeignKey(DiscussionSession, on_delete=models.CASCADE, related_name="grader_responses")
+    user_id = models.PositiveIntegerField()
+    scores = models.JSONField(default=list, blank=True)
+    reasons = models.JSONField(default=list, blank=True)
+    additional_comments = models.TextField(blank=True)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-submitted_at",)
+        constraints = [
+            models.UniqueConstraint(fields=("session", "user_id"), name="unique_discussion_grader_response_per_user"),
+        ]
+
+    def __str__(self) -> str:
+        return f"DiscussionGraderResponse<session={self.session_id}, user={self.user_id}>"
 
