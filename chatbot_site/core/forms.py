@@ -11,25 +11,22 @@ class ParticipantIdForm(forms.Form):
 
 
 class DiscussionSessionForm(forms.ModelForm):
+    # Unified questions field: stores list of {text, type} objects as JSON
     objective_questions = forms.CharField(
-        widget=forms.HiddenInput(),
-        required=False,
-    )
-    grader_objective_questions = forms.CharField(
         widget=forms.HiddenInput(),
         required=False,
     )
     question_followup_limit = forms.IntegerField(
         min_value=1,
         initial=3,
-        label="Follow-up limit per question",
-        help_text="Maximum number of participant replies to explore before moving to the next question.",
+        label="Follow-up limit for discussion questions",
+        help_text="Maximum number of participant replies to explore for each discussion question. Grading questions have no follow-ups.",
     )
     no_new_information_limit = forms.IntegerField(
         min_value=1,
         initial=2,
         label="Consecutive 'no new info' limit",
-        help_text="Number of responses without new information before the assistant advances or closes a question.",
+        help_text="Number of responses without new information before the assistant advances or closes a discussion question.",
     )
 
     class Meta:
@@ -41,7 +38,6 @@ class DiscussionSessionForm(forms.ModelForm):
             "question_followup_limit",
             "no_new_information_limit",
             "objective_questions",
-            "grader_objective_questions",
             "knowledge_base",
             "user_system_prompt",
             "moderator_system_prompt",
@@ -65,26 +61,19 @@ class DiscussionSessionForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        sequence = []
+        # Load existing unified questions
+        questions = []
         if self.instance and self.instance.pk:
-            sequence = self.instance.get_question_sequence()
+            questions = self.instance.get_all_questions()
             if self.instance.question_followup_limit:
                 self.fields["question_followup_limit"].initial = self.instance.question_followup_limit
             if self.instance.no_new_information_limit:
                 self.fields["no_new_information_limit"].initial = self.instance.no_new_information_limit
-        if not sequence:
-            sequence = []
-        self.fields["objective_questions"].initial = json.dumps(sequence)
-        # grader questions
-        grader_sequence = []
-        if self.instance and getattr(self.instance, "pk", None):
-            grader_sequence = self.instance.get_grader_question_sequence()
-        self.fields["grader_objective_questions"].initial = json.dumps(grader_sequence)
+        self.fields["objective_questions"].initial = json.dumps(questions)
 
     def save(self, commit=True):
         instance = super().save(commit=False)
         instance.objective_questions = self.cleaned_data.get("objective_questions", [])
-        instance.grader_objective_questions = self.cleaned_data.get("grader_objective_questions", [])
         instance.question_followup_limit = self.cleaned_data.get("question_followup_limit")
         instance.no_new_information_limit = self.cleaned_data.get("no_new_information_limit")
         if commit:
@@ -92,6 +81,10 @@ class DiscussionSessionForm(forms.ModelForm):
         return instance
 
     def clean_objective_questions(self):
+        """Parse and validate unified questions JSON.
+        
+        Expected format: [{"text": "...", "type": "grading"|"discussion"}, ...]
+        """
         raw = self.cleaned_data.get("objective_questions")
         if not raw:
             return []
@@ -100,31 +93,22 @@ class DiscussionSessionForm(forms.ModelForm):
         except json.JSONDecodeError as exc:
             raise forms.ValidationError("Unable to decode question list.") from exc
         if not isinstance(parsed, list):
-            raise forms.ValidationError("Question list must be an array of strings.")
+            raise forms.ValidationError("Question list must be an array.")
 
-        cleaned: list[str] = []
+        cleaned: list[dict] = []
         for entry in parsed:
-            text = str(entry).strip()
-            if text:
-                cleaned.append(text)
-        return cleaned
-
-    def clean_grader_objective_questions(self):
-        raw = self.cleaned_data.get("grader_objective_questions")
-        if not raw:
-            return []
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise forms.ValidationError("Unable to decode grader question list.") from exc
-        if not isinstance(parsed, list):
-            raise forms.ValidationError("Grader question list must be an array of strings.")
-
-        cleaned: list[str] = []
-        for entry in parsed:
-            text = str(entry).strip()
-            if text:
-                cleaned.append(text)
+            if isinstance(entry, dict):
+                text = str(entry.get("text", "")).strip()
+                qtype = str(entry.get("type", "discussion")).strip().lower()
+                if qtype not in ("grading", "discussion"):
+                    qtype = "discussion"
+                if text:
+                    cleaned.append({"text": text, "type": qtype})
+            elif isinstance(entry, str):
+                # Legacy support: plain string becomes discussion question
+                text = entry.strip()
+                if text:
+                    cleaned.append({"text": text, "type": "discussion"})
         return cleaned
 
 

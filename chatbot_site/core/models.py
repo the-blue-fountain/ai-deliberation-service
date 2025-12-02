@@ -23,11 +23,22 @@ class DiscussionSessionQuerySet(models.QuerySet):
 
 
 class DiscussionSession(models.Model):
-    """Represents a full moderator-led discussion workflow (Human-AI deliberation)."""
+    """Represents a full moderator-led discussion workflow (Human-AI deliberation).
+    
+    Questions are stored in a unified format:
+    objective_questions: list of dicts with keys:
+        - text: str (the question text)
+        - type: str ("grading" or "discussion")
+    
+    Grading questions: user provides a 1-10 score and a reason. No follow-up.
+    Discussion questions: AI-facilitated conversation with up to 3 follow-ups.
+    """
 
     s_id = models.CharField(max_length=64, unique=True)
-    # Ordered collection of objective questions shared by all participants.
+    # Ordered collection of questions (both grading and discussion) shared by all participants.
+    # Each entry is a dict: {"text": "...", "type": "grading"|"discussion"}
     objective_questions = models.JSONField(default=list, blank=True)
+    # Follow-up limit for discussion questions (grading questions always have 0)
     question_followup_limit = models.PositiveIntegerField(default=3)
     no_new_information_limit = models.PositiveIntegerField(default=2)
     topic = models.CharField(max_length=255, blank=True)
@@ -44,7 +55,6 @@ class DiscussionSession(models.Model):
         blank=True,
         help_text="Optional moderator-provided instructions for participants",
     )
-    grader_objective_questions = models.JSONField(default=list, blank=True)
     knowledge_base = models.TextField(blank=True)
     rag_chunk_count = models.PositiveIntegerField(default=0)
     rag_last_built_at = models.DateTimeField(null=True, blank=True)
@@ -70,55 +80,68 @@ class DiscussionSession(models.Model):
             self.is_active = True
             self.save(update_fields=["is_active"])
 
-    def get_question_sequence(self) -> list[str]:
-        """Return the ordered list of objective questions for this session."""
-
+    def get_all_questions(self) -> list[dict]:
+        """Return the ordered list of all questions with their types.
+        
+        Returns list of dicts: [{"text": "...", "type": "grading"|"discussion"}, ...]
+        """
         questions = []
         for entry in self.objective_questions or []:
-            if isinstance(entry, str):
+            if isinstance(entry, dict):
+                text = str(entry.get("text", "")).strip()
+                qtype = str(entry.get("type", "discussion")).strip().lower()
+                if qtype not in ("grading", "discussion"):
+                    qtype = "discussion"
+                if text:
+                    questions.append({"text": text, "type": qtype})
+            elif isinstance(entry, str):
+                # Legacy support: plain string becomes a discussion question
                 candidate = entry.strip()
-            else:
-                candidate = str(entry).strip()
-            if candidate:
-                questions.append(candidate)
+                if candidate:
+                    questions.append({"text": candidate, "type": "discussion"})
         return questions
 
-    def get_grader_question_sequence(self) -> list[str]:
-        """Return the ordered list of grader questions for this session."""
+    def get_question_sequence(self) -> list[str]:
+        """Return the ordered list of question texts (for backward compatibility)."""
+        return [q["text"] for q in self.get_all_questions()]
 
-        questions: list[str] = []
-        for entry in self.grader_objective_questions or []:
-            if isinstance(entry, str):
-                candidate = entry.strip()
-            else:
-                candidate = str(entry).strip()
-            if candidate:
-                questions.append(candidate)
-        return questions
+    def get_discussion_questions(self) -> list[dict]:
+        """Return only discussion-type questions."""
+        return [q for q in self.get_all_questions() if q["type"] == "discussion"]
+
+    def get_grading_questions(self) -> list[dict]:
+        """Return only grading-type questions."""
+        return [q for q in self.get_all_questions() if q["type"] == "grading"]
 
     def get_question_count(self) -> int:
-        return len(self.get_question_sequence())
+        return len(self.get_all_questions())
 
-    def get_question_at(self, index: int) -> str:
-        sequence = self.get_question_sequence()
+    def get_question_at(self, index: int) -> dict | None:
+        """Return the question dict at the given index, or None if out of bounds."""
+        sequence = self.get_all_questions()
         if 0 <= index < len(sequence):
             return sequence[index]
-        return ""
+        return None
+
+    def get_question_text_at(self, index: int) -> str:
+        """Return just the question text at the given index."""
+        q = self.get_question_at(index)
+        return q["text"] if q else ""
+
+    def get_question_type_at(self, index: int) -> str:
+        """Return the question type at the given index."""
+        q = self.get_question_at(index)
+        return q["type"] if q else "discussion"
 
     def get_objective_for_user(self, user_id: int, *, conversation: "UserConversation | None" = None) -> str:
-        """Return the active objective question for the participant.
-
-        If a conversation instance is supplied (or found via user_id), the current
-        question index will be used. Otherwise, the first question (if any) is
-        returned. Maintains API compatibility with legacy callers.
-        """
+        """Return the active objective question text for the participant."""
 
         target_conversation = conversation
         if target_conversation is None:
             target_conversation = self.conversations.filter(user_id=user_id).first()
         if target_conversation is not None:
-            return self.get_question_at(target_conversation.current_question_index)
-        return self.get_question_at(0)
+            return self.get_question_text_at(target_conversation.current_question_index)
+        return self.get_question_text_at(0)
 
     @classmethod
     def get_active(cls) -> "DiscussionSession":
@@ -137,7 +160,17 @@ class DiscussionSession(models.Model):
 
 
 class UserConversation(models.Model):
-    """Tracks one user's discussion history and state within a session."""
+    """Tracks one user's discussion history and state within a session.
+    
+    The responses field stores all user responses in order, keyed by question index:
+    [
+        {"question_index": 0, "question_text": "...", "question_type": "grading", 
+         "score": 8, "reason": "...", "discussion_history": []},
+        {"question_index": 1, "question_text": "...", "question_type": "discussion",
+         "score": null, "reason": null, "discussion_history": [{"role": "user", "content": "..."}, ...]},
+        ...
+    ]
+    """
 
     session = models.ForeignKey(
         DiscussionSession,
@@ -145,7 +178,9 @@ class UserConversation(models.Model):
         related_name="conversations",
     )
     user_id = models.PositiveIntegerField()
-    history = models.JSONField(default=list, blank=True)
+    history = models.JSONField(default=list, blank=True)  # Legacy: full conversation history
+    # Per-question responses (unified format for grading and discussion)
+    responses = models.JSONField(default=list, blank=True)
     scratchpad = models.TextField(blank=True)
     views_markdown = models.TextField(blank=True)
     message_count = models.PositiveIntegerField(default=0)
@@ -171,6 +206,57 @@ class UserConversation(models.Model):
         payload = list(self.history or [])
         payload.append({"role": role, "content": content})
         self.history = payload
+
+    def get_response_for_question(self, question_index: int) -> dict | None:
+        """Get stored response for a specific question index."""
+        for resp in self.responses or []:
+            if resp.get("question_index") == question_index:
+                return resp
+        return None
+
+    def set_response_for_question(
+        self,
+        question_index: int,
+        question_text: str,
+        question_type: str,
+        score: int | None = None,
+        reason: str | None = None,
+        discussion_history: list | None = None,
+    ) -> None:
+        """Store or update response for a specific question."""
+        responses = list(self.responses or [])
+        
+        # Find and update existing, or append new
+        found = False
+        for resp in responses:
+            if resp.get("question_index") == question_index:
+                resp["question_text"] = question_text
+                resp["question_type"] = question_type
+                if score is not None:
+                    resp["score"] = score
+                if reason is not None:
+                    resp["reason"] = reason
+                if discussion_history is not None:
+                    resp["discussion_history"] = discussion_history
+                found = True
+                break
+        
+        if not found:
+            responses.append({
+                "question_index": question_index,
+                "question_text": question_text,
+                "question_type": question_type,
+                "score": score,
+                "reason": reason,
+                "discussion_history": discussion_history or [],
+            })
+        
+        self.responses = responses
+
+    def get_all_responses(self) -> list[dict]:
+        """Get all stored responses sorted by question index."""
+        responses = list(self.responses or [])
+        return sorted(responses, key=lambda x: x.get("question_index", 0))
 
     def __str__(self) -> str:
         return f"UserConversation<session={self.session_id}, user={self.user_id}>"
@@ -368,27 +454,6 @@ class GraderResponse(models.Model):
         return f"GraderResponse<session={self.session_id}, user={self.user_id}>"
 
 
-class DiscussionGraderResponse(models.Model):
-    """Stores one participant's grader responses collected as part of a DiscussionSession.
-
-    - scores: list of integers aligned with DiscussionSession.grader_objective_questions
-    - reasons: list of strings giving a reason for each score
-    - additional_comments: optional free-text from the participant
-    """
-
-    session = models.ForeignKey(DiscussionSession, on_delete=models.CASCADE, related_name="grader_responses")
-    user_id = models.PositiveIntegerField()
-    scores = models.JSONField(default=list, blank=True)
-    reasons = models.JSONField(default=list, blank=True)
-    additional_comments = models.TextField(blank=True)
-    submitted_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ("-submitted_at",)
-        constraints = [
-            models.UniqueConstraint(fields=("session", "user_id"), name="unique_discussion_grader_response_per_user"),
-        ]
-
-    def __str__(self) -> str:
-        return f"DiscussionGraderResponse<session={self.session_id}, user={self.user_id}>"
+# Note: DiscussionGraderResponse is no longer needed. Responses are now stored 
+# inline in UserConversation.responses for unified question handling.
 

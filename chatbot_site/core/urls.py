@@ -22,8 +22,12 @@ urlpatterns = [
     path('grader/moderator/', views.grader_moderator_dashboard, name='grader_moderator_dashboard'),
     path('grader/user/<int:user_id>/', views.grader_user_view, name='grader_user'),
     path('grader/export/<int:session_id>/', views.grader_export_csv, name='grader_export'),
-    # Integrated grader for DiscussionSession
+    # Integrated grader for DiscussionSession (legacy)
     path('human/grader/user/<int:user_id>/', views.discussion_grader_user_view, name='discussion_grader_user'),
     path('human/grader/export/<int:session_id>/', views.discussion_grader_export_csv, name='discussion_grader_export'),
+    # Unified export views (new format)
+    path('human/export/user/<int:session_id>/<int:user_id>/', views.export_user_csv, name='export_user_csv'),
+    path('human/export/ratings/<int:session_id>/', views.export_ratings_csv, name='export_ratings_csv'),
+    path('human/export/summary/<int:session_id>/', views.download_summary_json, name='download_summary_json'),
 ]
 

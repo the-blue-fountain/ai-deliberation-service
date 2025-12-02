@@ -9,17 +9,28 @@
                     <h2 class="fs-4 mb-1">Question</h2>
                     {% if question %}
                         {% if question_total > 0 %}
-                            <p class="small text-muted mb-1">Question {{ question_position }} of {{ question_total }}</p>
+                            <p class="small text-muted mb-1">
+                                Question {{ question_position }} of {{ question_total }}
+                                {% if question_type == "grading" %}
+                                    <span class="badge bg-warning text-dark ms-2">Grading</span>
+                                {% else %}
+                                    <span class="badge bg-primary ms-2">Discussion</span>
+                                {% endif %}
+                            </p>
                         {% endif %}
                         <p class="lead mb-0">{{ question }}</p>
-                        {% if question_followup_limit %}
-                            <p class="small text-muted mt-2 mb-0">Responses remaining for this question: {{ question_followups_remaining }} of {{ question_followup_limit }}</p>
-                        {% endif %}
-                        {% if no_new_information_limit %}
-                            <p class="small text-muted mt-1 mb-0">Consecutive responses without new information before auto-advance: {{ no_new_information_remaining }} of {{ no_new_information_limit }}</p>
+                        {% if question_type == "discussion" %}
+                            {% if question_followup_limit %}
+                                <p class="small text-muted mt-2 mb-0">Responses remaining for this question: {{ question_followups_remaining }} of {{ question_followup_limit }}</p>
+                            {% endif %}
+                            {% if no_new_information_limit %}
+                                <p class="small text-muted mt-1 mb-0">Consecutive responses without new information before auto-advance: {{ no_new_information_remaining }} of {{ no_new_information_limit }}</p>
+                            {% endif %}
+                        {% else %}
+                            <p class="small text-muted mt-2 mb-0">Rate this on a scale of 1-10 and explain your reasoning.</p>
                         {% endif %}
                     {% elif question_total > 0 %}
-                        <p class="lead mb-0">All moderator questions have been completed. Thank you for your contributions.</p>
+                        <p class="lead mb-0">All questions have been completed. Thank you for your contributions!</p>
                     {% else %}
                         <p class="lead mb-0">No question configured for you yet.</p>
                     {% endif %}
@@ -38,6 +49,34 @@
             {% endif %}
         </div>
 
+        {% if question_type == "grading" and conversation.active %}
+        <!-- Grading Question Form -->
+        <div class="card content-card p-4 mb-4">
+            <h2 class="fs-5 mb-3">Your Rating</h2>
+            <form method="post" novalidate>
+                {% csrf_token %}
+                <input type="hidden" name="action" value="submit_grading">
+                <div class="mb-3">
+                    <label for="score" class="form-label">Score (1-10)</label>
+                    <select name="score" id="score" class="form-select" style="max-width: 120px;" required>
+                        <option value="">Select...</option>
+                        {% for i in "12345678910"|make_list %}
+                        <option value="{{ i }}" {% if existing_grading.score|stringformat:"s" == i %}selected{% endif %}>{{ i }}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-text">1 = Poor, 10 = Excellent</div>
+                </div>
+                <div class="mb-3">
+                    <label for="reason" class="form-label">Reason for your score</label>
+                    <textarea name="reason" id="reason" class="form-control" rows="4" required placeholder="Explain why you chose this score...">{{ existing_grading.reason|default:"" }}</textarea>
+                </div>
+                <div class="d-flex justify-content-end">
+                    <button type="submit" class="btn btn-primary">Submit Rating</button>
+                </div>
+            </form>
+        </div>
+        {% elif question_type == "discussion" %}
+        <!-- Discussion Question Conversation -->
         <div class="card content-card p-4 mb-4">
             <h2 class="fs-5 mb-3">Conversation</h2>
             {% if history %}
@@ -100,9 +139,54 @@
             {% endif %}
         </div>
         {% endif %}
+        {% else %}
+        <!-- Session completed -->
+        <div class="card content-card p-4">
+            <div class="d-flex gap-2">
+                <a href="{% url 'entry' %}" class="btn btn-outline-secondary">Back to Entry</a>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <div class="col-12 col-lg-5">
+        {% if all_responses %}
+        <div class="card content-card p-4 mb-4">
+            <h2 class="fs-5 mb-3">Your Responses</h2>
+            <div class="list-group list-group-flush">
+                {% for resp in all_responses %}
+                <div class="list-group-item">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <strong class="small">Q{{ resp.question_index|add:1 }}:</strong>
+                        {% if resp.question_type == "grading" %}
+                        <span class="badge bg-warning text-dark">Grading</span>
+                        {% else %}
+                        <span class="badge bg-primary">Discussion</span>
+                        {% endif %}
+                    </div>
+                    <p class="small text-muted mb-1">{{ resp.question_text|truncatewords:15 }}</p>
+                    {% if resp.question_type == "grading" %}
+                        <div class="small">
+                            <strong>Score:</strong> {{ resp.score }}/10
+                            {% if resp.reason %}
+                            <br><strong>Reason:</strong> {{ resp.reason|truncatewords:20 }}
+                            {% endif %}
+                        </div>
+                    {% else %}
+                        <div class="small text-muted">
+                            {% if resp.discussion_history %}
+                            {{ resp.discussion_history|length }} messages exchanged
+                            {% else %}
+                            In progress...
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
         <div class="card content-card p-4 mb-4">
             <h2 class="fs-5 mb-3">Live Notes</h2>
             {% if temp_snapshot %}
@@ -116,7 +200,7 @@
             {% if views_snapshot %}
                 <div class="markdown-box">{{ views_snapshot }}</div>
             {% else %}
-                <p class="text-muted">Stop the conversation to generate your final analysis.</p>
+                <p class="text-muted">Complete all questions to generate your final analysis.</p>
             {% endif %}
         </div>
     </div>

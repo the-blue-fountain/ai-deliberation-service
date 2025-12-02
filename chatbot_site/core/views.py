@@ -14,7 +14,7 @@ from .forms import (
     SessionSelectionForm,
     UserMessageForm,
 )
-from .models import DiscussionSession, UserConversation, DiscussionGraderResponse
+from .models import DiscussionSession, UserConversation
 from .services.conversation_service import (
     ModeratorAnalysisService,
     UserConversationService,
@@ -191,13 +191,7 @@ def entry_point(request: HttpRequest) -> HttpResponse:
             participant_id = form.cleaned_data["participant_id"]
             if participant_id == 0:
                 return redirect("moderator_dashboard")
-            if session and session.get_grader_question_sequence():
-                has_grader_response = DiscussionGraderResponse.objects.filter(
-                    session=session,
-                    user_id=participant_id,
-                ).exists()
-                if not has_grader_response:
-                    return redirect("discussion_grader_user", user_id=participant_id)
+            # Go directly to the unified conversation view
             return redirect("user_conversation", user_id=participant_id)
     else:
         form = ParticipantIdForm()
@@ -366,34 +360,91 @@ def moderator_dashboard(request: HttpRequest) -> HttpResponse:
 
 
 def user_conversation(request: HttpRequest, user_id: int) -> HttpResponse:
+    """Unified participant view handling both grading and discussion questions inline."""
     session = DiscussionSession.get_active()
-    if session and session.get_grader_question_sequence():
-        if not DiscussionGraderResponse.objects.filter(session=session, user_id=user_id).exists():
-            messages.info(request, "Please complete the grader prompts before starting the discussion.")
-            return redirect("discussion_grader_user", user_id=user_id)
     conversation, _ = UserConversation.objects.get_or_create(session=session, user_id=user_id)
 
-    # Determine the current question context for this participant
+    all_questions = session.get_all_questions() if session else []
+    total_questions = len(all_questions)
+    current_index = conversation.current_question_index
+
+    # Check if we've completed all questions
+    if current_index >= total_questions:
+        conversation.active = False
+        conversation.save(update_fields=["active"])
+
+    current_question = session.get_question_at(current_index) if session and current_index < total_questions else None
+    current_question_text = current_question["text"] if current_question else ""
+    current_question_type = current_question["type"] if current_question else "discussion"
+
     temp_snapshot = conversation.scratchpad or ""
     views_snapshot = conversation.views_markdown or ""
-
     result_payload: Optional[Dict[str, Any]] = None
 
     if request.method == "POST":
         action = request.POST.get("action", "send")
+
         if action == "stop":
+            # Manual stop
             service = UserConversationService(session, conversation)
             try:
                 final_views = service.stop_conversation()
-            except Exception as exc:  # pragma: no cover - defensive
+            except Exception as exc:
                 messages.error(request, f"Unable to stop the conversation: {exc}")
             else:
                 messages.info(request, "Conversation stopped. Final views document generated.")
                 views_snapshot = final_views
                 conversation.refresh_from_db()
-            form = UserMessageForm()
             temp_snapshot = conversation.scratchpad
-        else:
+
+        elif action == "submit_grading" and current_question_type == "grading":
+            # Handle grading question submission
+            score_raw = request.POST.get("score", "")
+            reason = request.POST.get("reason", "").strip()
+
+            try:
+                score = int(score_raw)
+                if not (1 <= score <= 10):
+                    raise ValueError("Score out of range")
+            except (ValueError, TypeError):
+                messages.error(request, "Please provide a valid score between 1 and 10.")
+            else:
+                if not reason:
+                    messages.error(request, "Please provide a reason for your score.")
+                else:
+                    # Store the grading response
+                    conversation.set_response_for_question(
+                        question_index=current_index,
+                        question_text=current_question_text,
+                        question_type="grading",
+                        score=score,
+                        reason=reason,
+                    )
+
+                    # Move to next question (grading questions have no follow-up)
+                    conversation.current_question_index = current_index + 1
+                    # IMPORTANT: Reset follow-up counters for the new question
+                    conversation.question_followups = 0
+                    conversation.consecutive_no_new = 0
+                    # Clear the conversation history for the new question
+                    conversation.history = []
+
+                    # Check if that was the last question
+                    if conversation.current_question_index >= total_questions:
+                        conversation.active = False
+                        # Generate final analysis
+                        service = UserConversationService(session, conversation)
+                        final_views = service._finalize_from_temp()
+                        views_snapshot = final_views
+                        messages.info(request, "All questions completed. Thank you for your participation.")
+                    else:
+                        messages.success(request, "Response recorded. Moving to next question.")
+
+                    conversation.save()
+                    return redirect("user_conversation", user_id=user_id)
+
+        elif action == "send" and current_question_type == "discussion":
+            # Handle discussion question with AI conversation
             form = UserMessageForm(request.POST)
             if not session.topic:
                 messages.error(request, "Cannot start until the moderator shares a topic.")
@@ -404,7 +455,7 @@ def user_conversation(request: HttpRequest, user_id: int) -> HttpResponse:
                 service = UserConversationService(session, conversation)
                 try:
                     result = service.process_user_message(message)
-                except Exception as exc:  # pragma: no cover - defensive
+                except Exception as exc:
                     messages.error(request, f"The user bot encountered an error: {exc}")
                 else:
                     result_payload = {
@@ -420,77 +471,76 @@ def user_conversation(request: HttpRequest, user_id: int) -> HttpResponse:
                     temp_snapshot = conversation.scratchpad
                     if result.final_views_md is not None:
                         views_snapshot = result.final_views_md
-                    form = UserMessageForm()
 
                     if result.ended:
                         end_reason = result.end_reason or ""
                         if end_reason == "no_new_limit":
                             messages.info(
                                 request,
-                                "Conversation closed after reaching the moderator-defined limit for consecutive responses without new information on the final question.",
+                                "Moving to next question after reaching the limit for consecutive responses without new information.",
                             )
                         elif end_reason == "followup_limit":
                             messages.info(
                                 request,
-                                "Conversation closed after reaching the moderator-defined follow-up limit on the final question.",
+                                "Moving to next question after reaching the follow-up limit.",
                             )
-                        elif end_reason == "message_limit":
-                            messages.info(request, "Conversation closed after reaching the 15 message limit.")
+                        elif end_reason == "all_complete":
+                            messages.info(request, "All questions completed. Thank you for your participation.")
                         else:
                             messages.info(request, "Conversation closed.")
             else:
                 messages.error(request, "Please enter a response before submitting.")
-    else:
-        form = UserMessageForm()
 
-    question_sequence = session.get_question_sequence() if session else []
-    current_question = session.get_objective_for_user(user_id, conversation=conversation) if session else ""
-    question_total = len(question_sequence)
+    # Refresh state after potential changes
+    conversation.refresh_from_db()
     current_index = conversation.current_question_index
-    if current_question:
-        question_position = min(current_index + 1, question_total)
-    elif question_total:
-        question_position = question_total
-    else:
-        question_position = 0
+    current_question = session.get_question_at(current_index) if session and current_index < total_questions else None
+    current_question_text = current_question["text"] if current_question else ""
+    current_question_type = current_question["type"] if current_question else "discussion"
 
-    if session and not current_question and conversation.active and question_total == 0:
-        messages.info(
-            request,
-            "The moderator has not provided questions yet. Please wait before sharing details.",
-        )
+    # For discussion questions, get the next question preview
+    next_question = None
+    if conversation.active and current_index + 1 < total_questions:
+        next_question = session.get_question_at(current_index + 1)
 
-    next_question = ""
-    if conversation.active and question_total and current_index + 1 < question_total:
-        next_question = question_sequence[current_index + 1]
+    # Get follow-up info (only relevant for discussion questions)
+    followup_limit = session.question_followup_limit if session else 3
+    followups_used = conversation.question_followups if current_question_type == "discussion" else 0
+    followups_remaining = max(followup_limit - followups_used, 0) if current_question_type == "discussion" else 0
 
-    followup_limit = session.question_followup_limit if session else 0
-    followups_used = conversation.question_followups if current_question else 0
-    followups_remaining = max(followup_limit - followups_used, 0) if followup_limit else 0
+    no_new_limit = session.no_new_information_limit if session else 2
+    no_new_streak = conversation.consecutive_no_new if current_question_type == "discussion" else 0
+    no_new_remaining = max(no_new_limit - no_new_streak, 0) if current_question_type == "discussion" else 0
 
-    no_new_limit = session.no_new_information_limit if session else 0
-    no_new_streak = conversation.consecutive_no_new if current_question else 0
-    no_new_remaining = max(no_new_limit - no_new_streak, 0) if no_new_limit else 0
+    # Get existing grading response for current question (for pre-fill)
+    existing_grading = conversation.get_response_for_question(current_index) if current_question_type == "grading" else None
+
+    # Get all responses for display
+    all_responses = conversation.get_all_responses()
 
     context = {
         "session": session,
         "conversation": conversation,
-        "form": form,
+        "form": UserMessageForm(),
         "history": conversation.history or [],
         "result": result_payload,
         "temp_snapshot": temp_snapshot,
         "views_snapshot": views_snapshot,
-        "topic": session.topic,
-        "question": current_question,
-        "question_sequence": question_sequence,
-        "question_total": question_total,
-        "question_position": question_position,
+        "topic": session.topic if session else "",
+        "question": current_question_text,
+        "question_type": current_question_type,
+        "question_data": current_question,
+        "all_questions": all_questions,
+        "question_total": total_questions,
+        "question_position": min(current_index + 1, total_questions) if current_question else total_questions,
         "question_next": next_question,
         "question_followup_limit": followup_limit,
         "question_followups_used": followups_used,
         "question_followups_remaining": followups_remaining,
         "no_new_information_limit": no_new_limit,
         "no_new_information_remaining": no_new_remaining,
+        "existing_grading": existing_grading,
+        "all_responses": all_responses,
     }
     return render(request, "core/user_conversation.html", context)
 
@@ -1106,96 +1156,219 @@ def grader_export_csv(request: HttpRequest, session_id: int) -> HttpResponse:
 
 
 def discussion_grader_export_csv(request: HttpRequest, session_id: int) -> HttpResponse:
-    """Export integrated grader responses (for DiscussionSession) as CSV."""
-    from .models import DiscussionSession, DiscussionGraderResponse
+    """Legacy: Export grader responses. Now redirects to unified export."""
+    # Redirect to new unified ratings export
+    return redirect("export_ratings_csv", session_id=session_id)
 
+
+def discussion_grader_user_view(request: HttpRequest, user_id: int) -> HttpResponse:
+    """Legacy: Participant grader view. Now redirects to unified conversation view.
+    
+    Grading is now handled inline in the user_conversation view.
+    """
+    messages.info(request, "Grading questions are now integrated into the main conversation flow.")
+    return redirect("user_conversation", user_id=user_id)
+
+
+# ============================================================================
+# UNIFIED EXPORT VIEWS (for new unified question format)
+# ============================================================================
+
+
+def export_user_csv(request: HttpRequest, session_id: int, user_id: int) -> HttpResponse:
+    """Export a single user's responses as CSV (question + response columns)."""
     try:
         session = DiscussionSession.objects.get(pk=session_id)
     except DiscussionSession.DoesNotExist:
-        messages.error(request, "Discussion session not found.")
+        messages.error(request, "Session not found.")
         return redirect("moderator_dashboard")
 
-    questions = session.get_grader_question_sequence()
-    responses = DiscussionGraderResponse.objects.filter(session=session).order_by("user_id")
+    try:
+        conversation = UserConversation.objects.get(session=session, user_id=user_id)
+    except UserConversation.DoesNotExist:
+        messages.error(request, f"No conversation found for user {user_id}.")
+        return redirect("moderator_dashboard")
+
+    all_questions = session.get_all_questions()
+    responses = conversation.get_all_responses()
 
     output = io.StringIO()
     writer = csv.writer(output)
 
-    header = ["User ID"]
-    for i, q in enumerate(questions):
-        header.append(f"Q{i+1} Score")
-        header.append(f"Q{i+1} Reason")
-    header.append("Additional Comments")
-    writer.writerow(header)
+    # Header row
+    writer.writerow(["Question #", "Question Type", "Question Text", "Score", "Reason/Response", "Discussion Messages"])
 
-    for resp in responses:
-        row = [resp.user_id]
-        for i, q in enumerate(questions):
-            score = resp.scores[i] if i < len(resp.scores) else ""
-            reason = resp.reasons[i] if i < len(resp.reasons) else ""
-            row.append(score)
-            row.append(reason)
-        row.append(resp.additional_comments or "")
-        writer.writerow(row)
+    # Build a lookup of responses by question index
+    response_lookup = {r.get("question_index"): r for r in responses}
+
+    for i, q in enumerate(all_questions):
+        resp = response_lookup.get(i, {})
+        q_text = q.get("text", "")
+        q_type = q.get("type", "discussion")
+
+        if q_type == "grading":
+            score = resp.get("score", "")
+            reason = resp.get("reason", "")
+            writer.writerow([i + 1, q_type.capitalize(), q_text, score, reason, ""])
+        else:
+            # For discussion questions, concatenate the history
+            history = resp.get("discussion_history", [])
+            if history:
+                history_text = " | ".join([f"{m.get('role', 'unknown')}: {m.get('content', '')}" for m in history])
+            else:
+                history_text = ""
+            writer.writerow([i + 1, q_type.capitalize(), q_text, "", "", history_text])
 
     response = HttpResponse(output.getvalue(), content_type="text/csv")
-    response["Content-Disposition"] = f"attachment; filename=discussion_grader_{session.s_id}_{session.pk}.csv"
+    response["Content-Disposition"] = f"attachment; filename=user_{user_id}_{session.s_id}_{session.pk}.csv"
     return response
 
 
-def discussion_grader_user_view(request: HttpRequest, user_id: int) -> HttpResponse:
-    """Participant-facing grader form integrated into a DiscussionSession."""
-    from .models import DiscussionSession, DiscussionGraderResponse
+def export_ratings_csv(request: HttpRequest, session_id: int) -> HttpResponse:
+    """Export overall grading ratings as CSV (users x questions matrix with averages)."""
+    try:
+        session = DiscussionSession.objects.get(pk=session_id)
+    except DiscussionSession.DoesNotExist:
+        messages.error(request, "Session not found.")
+        return redirect("moderator_dashboard")
 
-    session = DiscussionSession.get_active()
-    if not session:
-        messages.error(request, "No active discussion session is available.")
-        return redirect("system_choice")
+    all_questions = session.get_all_questions()
+    grading_questions = [(i, q) for i, q in enumerate(all_questions) if q.get("type") == "grading"]
 
-    questions = session.get_grader_question_sequence()
+    if not grading_questions:
+        messages.warning(request, "No grading questions found in this session.")
+        return redirect("moderator_dashboard")
 
-    if request.method == "POST":
-        # Extract scores and reasons
-        scores = []
-        reasons = []
-        for i in range(len(questions)):
-            s = request.POST.get(f"score_{i}")
-            try:
-                sv = int(s)
-            except Exception:
-                sv = None
-            scores.append(sv)
-            reasons.append(request.POST.get(f"reason_{i}", ""))
+    conversations = UserConversation.objects.filter(session=session).order_by("user_id")
 
-        additional = request.POST.get("additional_comments", "")
+    output = io.StringIO()
+    writer = csv.writer(output)
 
-        resp, _ = DiscussionGraderResponse.objects.update_or_create(
-            session=session,
-            user_id=user_id,
-            defaults={
-                "scores": scores,
-                "reasons": reasons,
-                "additional_comments": additional,
-            },
-        )
-        messages.success(request, "Your grader responses have been saved. Thank you.")
-        return redirect("user_conversation", user_id=user_id)
+    # Header row: User ID, Q1 Score, Q1 Reason, Q2 Score, Q2 Reason, ...
+    header = ["User ID"]
+    for idx, q in grading_questions:
+        q_num = idx + 1
+        header.append(f"Q{q_num} Score")
+        header.append(f"Q{q_num} Reason")
+    writer.writerow(header)
 
-    # Pre-fill if response exists
-    existing = DiscussionGraderResponse.objects.filter(session=session, user_id=user_id).first()
-    initial_scores = existing.scores if existing else [None] * len(questions)
-    initial_reasons = existing.reasons if existing else [""] * len(questions)
+    # Data rows for each user
+    all_scores: Dict[int, List[Optional[int]]] = {}  # question_index -> list of scores
 
-    questions_data = []
-    for i, q in enumerate(questions):
-        questions_data.append((i, q, initial_scores[i] if i < len(initial_scores) else None, initial_reasons[i] if i < len(initial_reasons) else ""))
+    for conv in conversations:
+        responses = conv.get_all_responses()
+        response_lookup = {r.get("question_index"): r for r in responses}
 
-    context = {
-        "session": session,
-        "questions_data": questions_data,
-        "additional": existing.additional_comments if existing else "",
-        "user_id": user_id,
-        "next_url": "user_conversation",
+        row = [conv.user_id]
+        for q_idx, q in grading_questions:
+            resp = response_lookup.get(q_idx, {})
+            score = resp.get("score")
+            reason = resp.get("reason", "")
+            row.append(score if score is not None else "")
+            row.append(reason)
+
+            # Track for averages
+            if q_idx not in all_scores:
+                all_scores[q_idx] = []
+            if score is not None:
+                all_scores[q_idx].append(score)
+
+        writer.writerow(row)
+
+    # Average row
+    avg_row: List[Any] = ["AVERAGE"]
+    for q_idx, q in grading_questions:
+        scores = all_scores.get(q_idx, [])
+        if scores:
+            avg = sum(scores) / len(scores)
+            avg_row.append(f"{avg:.2f}")
+        else:
+            avg_row.append("")
+        avg_row.append("")  # No average for reason column
+    writer.writerow(avg_row)
+
+    response = HttpResponse(output.getvalue(), content_type="text/csv")
+    response["Content-Disposition"] = f"attachment; filename=ratings_{session.s_id}_{session.pk}.csv"
+    return response
+
+
+def download_summary_json(request: HttpRequest, session_id: int) -> HttpResponse:
+    """Download the session summary as a JSON file."""
+    try:
+        session = DiscussionSession.objects.get(pk=session_id)
+    except DiscussionSession.DoesNotExist:
+        messages.error(request, "Session not found.")
+        return redirect("moderator_dashboard")
+
+    all_questions = session.get_all_questions()
+    conversations = UserConversation.objects.filter(session=session).order_by("user_id")
+
+    # Build comprehensive summary
+    summary: Dict[str, Any] = {
+        "session_id": session.s_id,
+        "session_pk": session.pk,
+        "topic": session.topic,
+        "description": session.description,
+        "created_at": session.created_at.isoformat() if session.created_at else None,
+        "questions": all_questions,
+        "moderator_summary": None,
+        "moderator_temp": session.moderator_temp or None,
+        "users": [],
+        "grading_statistics": {},
     }
-    return render(request, "core/grader_user_conversation.html", context)
+
+    # Parse moderator summary if available
+    if session.moderator_summary:
+        try:
+            summary["moderator_summary"] = json.loads(session.moderator_summary)
+        except json.JSONDecodeError:
+            summary["moderator_summary"] = session.moderator_summary
+
+    # Collect user data
+    grading_questions = [(i, q) for i, q in enumerate(all_questions) if q.get("type") == "grading"]
+    all_scores: Dict[int, List[int]] = {q_idx: [] for q_idx, _ in grading_questions}
+
+    for conv in conversations:
+        responses = conv.get_all_responses()
+        user_data: Dict[str, Any] = {
+            "user_id": conv.user_id,
+            "active": conv.active,
+            "message_count": conv.message_count,
+            "responses": responses,
+            "views_markdown": conv.views_markdown or None,
+        }
+        summary["users"].append(user_data)
+
+        # Collect grading scores for stats
+        response_lookup = {r.get("question_index"): r for r in responses}
+        for q_idx, _ in grading_questions:
+            resp = response_lookup.get(q_idx, {})
+            score = resp.get("score")
+            if score is not None:
+                all_scores[q_idx].append(score)
+
+    # Calculate grading statistics
+    for q_idx, scores in all_scores.items():
+        q_data = all_questions[q_idx] if q_idx < len(all_questions) else {}
+        stats: Dict[str, Any] = {
+            "question_index": q_idx,
+            "question_text": q_data.get("text", ""),
+            "response_count": len(scores),
+        }
+        if scores:
+            stats["average"] = sum(scores) / len(scores)
+            stats["min"] = min(scores)
+            stats["max"] = max(scores)
+        else:
+            stats["average"] = None
+            stats["min"] = None
+            stats["max"] = None
+        summary["grading_statistics"][f"q{q_idx + 1}"] = stats
+
+    response = HttpResponse(
+        json.dumps(summary, indent=2, ensure_ascii=False),
+        content_type="application/json",
+    )
+    response["Content-Disposition"] = f"attachment; filename=summary_{session.s_id}_{session.pk}.json"
+    return response
 
