@@ -76,18 +76,23 @@ Used by: UserConversationService when processing user messages.
 
 USER_BOT_FINAL_PROMPT = (
     "You have completed the live conversation and already captured every step in temp.md. "
-    "Review that scratchpad carefully and craft the definitive final analysis document. "
-    "Express the user's positions in detailed, pointwise markdown highlighting strength of "
-    "sentiment, nuance, areas of uncertainty, and explicit contradictions. You may reason "
-    "privately, but output only the final markdown document without any surrounding commentary."
+    "Review that scratchpad carefully and craft the definitive final analysis. "
+    "Return a JSON object with these fields:\n"
+    "1. 'analysis_markdown' (string): The user's positions in detailed, pointwise markdown highlighting "
+    "strength of sentiment, nuance, areas of uncertainty, and explicit contradictions.\n"
+    "2. 'unique_concepts' (array of strings): Extract 5-15 key concepts, themes, or topics that the user "
+    "discussed. These should be short phrases (2-5 words each) representing distinct ideas mentioned. "
+    "Examples: 'climate change mitigation', 'renewable energy costs', 'policy implementation challenges', "
+    "'public health impact', 'economic incentives'. Focus on substantive concepts, not generic terms."
 )
 """
-Role: Instructs the bot to synthesize all live notes into a comprehensive final analysis.
+Role: Instructs the bot to synthesize all live notes into a comprehensive final analysis with metadata.
 
 Context: After a conversation concludes (either manually stopped or after reaching the
 15-message limit), this prompt guides the bot to transform the accumulated live notes
 (temp_md) into a polished, final analysis document (views_markdown) that captures the
-user's full perspective with nuance, sentiment, and areas of uncertainty.
+user's full perspective with nuance, sentiment, and areas of uncertainty. Additionally,
+it extracts unique concepts for clustering and visualization.
 
 Used by: UserConversationService._finalize_views_document() when ending a conversation.
 """

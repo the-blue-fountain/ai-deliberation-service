@@ -264,6 +264,13 @@
                     <p class="text-muted small mb-1">Per-user exports:</p>
                     {% for view in available_views %}
                         <a href="{% url 'export_user_csv' selected_session.pk view.user_id %}" class="btn btn-sm btn-outline-secondary mb-1">User {{ view.user_id }} CSV</a>
+                        <a href="{% url 'download_user_summary_markdown' selected_session.pk view.user_id %}" class="btn btn-sm btn-outline-primary mb-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" class="bi bi-markdown" viewBox="0 0 16 16">
+                                <path d="M14 3a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM2 2a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/>
+                                <path fill-rule="evenodd" d="M9.146 8.146a.5.5 0 0 1 .708 0L11 9.293l1.146-1.147a.5.5 0 0 1 .708.708l-1.5 1.5a.5.5 0 0 1-.708 0l-1.5-1.5a.5.5 0 0 1 0-.708M2.854 4.854a.5.5 0 0 1 0-.708l1.5-1.5a.5.5 0 0 1 .708 0l1.5 1.5a.5.5 0 0 1-.708.708L5 3.707 3.854 4.854a.5.5 0 0 1-.708 0m6 0a.5.5 0 0 1 0-.708l1.5-1.5a.5.5 0 0 1 .708 0l1.5 1.5a.5.5 0 0 1-.708.708L11 3.707 9.854 4.854a.5.5 0 0 1-.708 0M2.5 7a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1zm0 2a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1zm6-2a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1z"/>
+                            </svg>
+                            User {{ view.user_id }} MD
+                        </a>
                     {% empty %}
                         <span class="text-muted small">No user data available yet.</span>
                     {% endfor %}
@@ -272,7 +279,22 @@
                 <p class="text-muted mb-0">Run an analysis to populate the summary.</p>
             {% endif %}
         </div>
-        <div class="card content-card p-4">
+        
+        {% if selected_session and selected_session.concept_cluster_html %}
+        <div class="card content-card p-4 mt-4">
+            <h3 class="fs-5 mb-3">Concept Cluster Visualization</h3>
+            <div class="concept-cluster-container">
+                {{ selected_session.concept_cluster_html|safe }}
+            </div>
+            <p class="text-muted small mt-2">
+                <strong>How to read:</strong> Node size represents how frequently a concept was discussed. 
+                Node color shows how connected it is to other concepts. 
+                Lines between concepts indicate semantic relationships or co-occurrence in user responses.
+            </p>
+        </div>
+        {% endif %}
+        
+        <div class="card content-card p-4 mt-4">
             <h3 class="fs-5 mb-3">Analysis Notes</h3>
             {% if selected_session and selected_session.moderator_temp %}
                 <pre class="markdown-box mb-0">{{ selected_session.moderator_temp }}</pre>

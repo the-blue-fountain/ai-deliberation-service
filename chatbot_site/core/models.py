@@ -60,6 +60,7 @@ class DiscussionSession(models.Model):
     rag_last_built_at = models.DateTimeField(null=True, blank=True)
     moderator_temp = models.TextField(blank=True)
     moderator_summary = models.TextField(blank=True)
+    concept_cluster_html = models.TextField(blank=True, help_text="HTML visualization of concept clusters")
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -183,6 +184,10 @@ class UserConversation(models.Model):
     responses = models.JSONField(default=list, blank=True)
     scratchpad = models.TextField(blank=True)
     views_markdown = models.TextField(blank=True)
+    # New metadata fields for analytics
+    unique_concepts = models.JSONField(default=list, blank=True, help_text="List of unique concepts extracted from conversation")
+    content_length = models.PositiveIntegerField(default=0, help_text="Word count of final analysis")
+    termination_reason = models.CharField(max_length=50, blank=True, help_text="Why conversation ended: manual, followup_limit, no_new_limit, message_limit")
     message_count = models.PositiveIntegerField(default=0)
     consecutive_no_new = models.PositiveIntegerField(default=0)
     active = models.BooleanField(default=True)

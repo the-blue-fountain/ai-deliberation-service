@@ -376,8 +376,13 @@ class UserConversationService:
             result.ended = True
             if no_new_trigger and not has_any_next_question:
                 result.end_reason = "no_new_limit"
+                self.conversation.termination_reason = "no_new_limit"
             elif reached_limit and not has_any_next_question:
                 result.end_reason = result.end_reason or "followup_limit"
+                self.conversation.termination_reason = "followup_limit"
+            elif self.conversation.message_count >= 15:
+                result.end_reason = "message_limit"
+                self.conversation.termination_reason = "message_limit"
             streak_value = 0
 
         self.conversation.consecutive_no_new = 0 if (advance_to_next_question or close_conversation) else streak_value
@@ -430,10 +435,26 @@ class UserConversationService:
         completion = self.client.chat.completions.create(
             model=settings.OPENAI_MODEL_NAME,
             messages=messages,
+            response_format={"type": "json_object"},
         )
 
         final_content = completion.choices[0].message.content or ""
-        return final_content.strip()
+        
+        # Parse JSON response to extract analysis and concepts
+        try:
+            parsed = json.loads(final_content)
+            analysis_markdown = parsed.get("analysis_markdown", "")
+            unique_concepts = parsed.get("unique_concepts", [])
+            
+            # Store concepts and calculate content length
+            self.conversation.unique_concepts = unique_concepts if isinstance(unique_concepts, list) else []
+            self.conversation.content_length = len(analysis_markdown.split()) if analysis_markdown else 0
+            
+            return analysis_markdown.strip()
+        except json.JSONDecodeError:
+            # Fallback: treat whole response as markdown
+            self.conversation.content_length = len(final_content.split())
+            return final_content.strip()
 
     def _finalize_from_temp(self) -> str:
         full_temp = self.conversation.scratchpad or ""
@@ -446,12 +467,13 @@ class UserConversationService:
 
         if self.conversation.active:
             self.conversation.active = False
-            self.conversation.save(update_fields=["active"])
+            self.conversation.termination_reason = "manual"
+            self.conversation.save(update_fields=["active", "termination_reason"])
 
         final_views = self.conversation.views_markdown or self._finalize_from_temp()
 
         self.conversation.views_markdown = final_views
-        self.conversation.save(update_fields=["views_markdown"])
+        self.conversation.save(update_fields=["views_markdown", "unique_concepts", "content_length"])
         return final_views
 
 
@@ -536,4 +558,22 @@ class ModeratorAnalysisService:
         self.session.moderator_temp = moderator_temp
         self.session.moderator_summary = moderator_summary
         self.session.save(update_fields=["moderator_temp", "moderator_summary"])
+        
+        # Generate concept clustering visualization
+        self.generate_concept_clusters()
+        
         return moderator_summary
+
+    def generate_concept_clusters(self) -> None:
+        """Generate and store concept cluster visualization."""
+        try:
+            from .concept_clustering_service import ConceptClusteringService
+            clustering_service = ConceptClusteringService(self.session)
+            concept_viz_html = clustering_service.generate_network_visualization()
+            self.session.concept_cluster_html = concept_viz_html
+            self.session.save(update_fields=["concept_cluster_html"])
+        except Exception as exc:  # pragma: no cover - defensive
+            # Log error but don't fail the entire analysis
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.exception("Failed to generate concept clusters: %s", exc)

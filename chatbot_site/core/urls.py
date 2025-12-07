@@ -29,5 +29,6 @@ urlpatterns = [
     path('human/export/user/<int:session_id>/<int:user_id>/', views.export_user_csv, name='export_user_csv'),
     path('human/export/ratings/<int:session_id>/', views.export_ratings_csv, name='export_ratings_csv'),
     path('human/export/summary/<int:session_id>/', views.download_summary_json, name='download_summary_json'),
+    path('human/export/user-markdown/<int:session_id>/<int:user_id>/', views.download_user_summary_markdown, name='download_user_summary_markdown'),
 ]
 
